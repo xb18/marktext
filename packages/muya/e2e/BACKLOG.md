@@ -1,5 +1,10 @@
 # muya-e2e BACKLOG (4-phase Roadmap)
 
+Phase counts and timings below are historical landing snapshots, not current
+coverage totals. Current CI (`.github/workflows/muya-e2e.yml`) installs and runs
+Chromium only. Firefox/WebKit remain available locally with the exclusions in
+`playwright.config.ts`.
+
 | Phase | Theme | Tests | CI delta | Status |
 | --- | --- | --- | --- | --- |
 | 1 | P0 smoke + key interaction skeleton (infra) | 28 (1 fixme) | ~3-4 min | ✅ landed |
@@ -39,8 +44,8 @@ Unlocks Firefox + WebKit, and the input/drag flows that don't survive cross-engi
 ### Cross-browser
 
 - [x] Uncomment `firefox` + `webkit` projects in `playwright.config.ts`.
-- [x] Drop the `--project=chromium` filter from `pnpm e2e`; add `pnpm e2e:firefox` / `pnpm e2e:webkit` aliases for targeted runs.
-- [x] `ci-e2e.yml`: install all three browsers (`playwright install --with-deps`), bump runner concurrency.
+- [x] Drop the `--project=chromium` filter from `pnpm --filter muya-e2e e2e`; add `pnpm --filter muya-e2e e2e:firefox` / `pnpm --filter muya-e2e e2e:webkit` aliases for targeted runs.
+- [x] Upstream cross-browser CI installed all three browsers. This workspace currently runs Chromium only in `.github/workflows/muya-e2e.yml`.
 
 ### IME composition
 
@@ -56,7 +61,7 @@ Unlocks Firefox + WebKit, and the input/drag flows that don't survive cross-engi
 ### E2E TypeScript typecheck
 
 - [ ] Add `lint:types` script to `e2e/package.json` (currently absent because the imported `@muyajs/core` source pulls in `__MUYA_BLOCK__` / module-augmentation globals that aren't re-declared in `e2e/types.d.ts`). Carried to Phase 3.
-- [ ] Either re-declare the needed globals in `e2e/types.d.ts`, or include `packages/core/src/types/global.d.ts` from the e2e tsconfig.
+- [ ] Either re-declare the needed globals in `e2e/types.d.ts`, or include `packages/muya/src/types/index.d.ts` from the e2e tsconfig.
 
 ### Real HTML clipboard
 
@@ -67,7 +72,7 @@ Unlocks Firefox + WebKit, and the input/drag flows that don't survive cross-engi
 
 - Cross-engine `editing/search-replace.spec.ts` rewrite (Firefox + WebKit both gated). Root cause: the host toolbar fires `replace()` synchronously and both engines swallow mid-flight DOM selection changes.
 - Cross-engine `inline/format-toolbar.spec.ts` + `inline/shortcuts.spec.ts` rewrite — both rely on Chromium's triple-click select-paragraph behaviour.
-- WebKit IME — synthetic CompositionEvent + InputEvent path reads stale block state under parallel-matrix load. Unit tests in `packages/core/src/block/base/__tests__/autoPair.spec.ts` cover the composeHandler branches.
+- WebKit IME — synthetic CompositionEvent + InputEvent path reads stale block state under parallel-matrix load. Unit tests in `packages/muya/src/block/base/__tests__/autoPair.spec.ts` cover the composeHandler branches.
 - Firefox + WebKit clipboard parity (above).
 
 ---
@@ -94,7 +99,7 @@ Local runtime ~+2s on top of Phase 1 baseline.
 - [x] Inject `<script>(window).__pwned = true</script>` via setContent → assert `window.__pwned` never set. Canary declared on `Window` in `e2e/types.d.ts`.
 - [x] Inject `<a href="javascript:alert(1)">x</a>` → assert anchor's rendered `href` is either dropped or no longer contains `javascript:`.
 - [x] Inject `<img src=x onerror="…">` → assert `onerror` attribute is stripped + canary not set.
-- [ ] Static export via `new MarkdownToHtml(md).generate()` against same payloads → assert sanitized HTML output. **Deferred to Phase 4** — current host doesn't expose `MarkdownToHtml` on `window`, and reaching for `page.evaluate(() => new (await import('@muyajs/core')).MarkdownToHtml(...))` would require new host plumbing. Phase 4 can wire it onto `window.__e2e` and assert the static path.
+- [x] Static export sanitization is covered in `tests/export/markdown-to-html.spec.ts`; the host exposes `window.MarkdownToHtml`.
 
 ---
 
@@ -120,7 +125,7 @@ Local runtime ~+2s on top of Phase 1 baseline.
 ### Option matrix
 
 - [x] `autoPairBracket` / `autoPairMarkdownSyntax` / `autoPairQuote` — full on/off matrix × representative input sequences. → `e2e/tests/options/autopair.spec.ts`.
-- [x] `focusMode: true` — option round-trips. → `e2e/tests/options/focus-mode.spec.ts`. **Caveat:** `focusMode` is currently a no-op in the implementation: the option flag and `MU_FOCUS_MODE` class name exist, but no render path applies the class. The spec asserts the option survives the constructor and the editor still functions; once a render path lands, tighten the spec to assert the marker class.
+- [x] `focusMode` applies `.mu-focus-mode` at construction and through `setFocusMode()`. `tests/options/focus-mode.spec.ts` checks the class and active/inactive block opacity.
 - [x] `spellcheckEnabled` — assert `spellcheck` attribute reflects. → `e2e/tests/options/spellcheck.spec.ts`.
 - [x] `disableHtml` — assert raw HTML stays unrendered. → `e2e/tests/options/disable-html.spec.ts`.
 
@@ -140,7 +145,6 @@ Local runtime ~+2s on top of Phase 1 baseline.
 - **a11y violations.** axe-core surfaced these non-critical findings during Phase 4 (logged in CI). Triage and either fix or document as known accepted: `landmark-one-main` (moderate), `region` (moderate), `scrollable-region-focusable` (serious), `page-has-heading-one` (moderate), `color-contrast` (serious, slash menu). The Phase 4 a11y bar is critical-only; Phase 5 should tighten to `serious+`.
 - **a11y of host test-harness toolbar.** `e2e/host/index.html`'s `.tools` block has unlabeled form controls (`<select id="language-select">` etc.) — excluded from axe scans in Phase 4. Add labels so we can drop the exclusion.
 - **Perf against production bundle.** Phase 4 perf spec runs against the Vite dev server (unbundled, no minification). 10k-paragraph `setContent` budget is 60s; against a production bundle the target should be the brief's original 5s. Wire a `vite build` + preview server option to e2e/ for a dedicated `@perf` lane.
-- **focusMode render path.** Surface `MU_FOCUS_MODE` class on the editor root when `focusMode: true`, then tighten `e2e/tests/options/focus-mode.spec.ts` to assert the visual marker.
 - **MutationObserver leak guard.** Extend the listener-leak spec to also count `MutationObserver` registrations once muya exposes that surface.
 
 ---

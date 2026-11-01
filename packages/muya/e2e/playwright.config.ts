@@ -33,9 +33,8 @@ export default defineConfig({
         // Phase 2: cross-browser matrix. Firefox + WebKit use the bundled
         // Playwright builds (no system-channel fallback — Firefox isn't
         // commonly preinstalled, and WebKit has no system equivalent on
-        // macOS). Install once via `pnpm --filter muya-e2e exec playwright
-        // install firefox webkit` (CI does this automatically through the
-        // `--with-deps` step in ci-e2e.yml).
+        // macOS). Install locally via `pnpm --filter muya-e2e exec playwright
+        // install firefox webkit`; this workspace's CI runs Chromium only.
         //
         // `triple-click select-paragraph` semantics differ between engines:
         // Chromium selects the full paragraph, Firefox and WebKit select
