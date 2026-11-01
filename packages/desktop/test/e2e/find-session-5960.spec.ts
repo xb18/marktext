@@ -109,6 +109,61 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator('.search-bar .replace input')).toHaveValue('pear')
   })
 
+  test('retains a regex when opening Replace and reopening on a selected match', async() => {
+    await setSourceMarkdown(page, app, 'cat1 cat2 cat10')
+    await placeSelection(page, 0, 0)
+    await openFind(app, page)
+    await page.locator('.search-bar .is-regex').click()
+    const input = page.locator(inputSelector)
+    await input.fill('cat([0-9]+)')
+    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 3')
+    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'replace')
+    await expect(input).toHaveValue('cat([0-9]+)')
+    await page.keyboard.press('Escape')
+    await openFind(app, page)
+    await expect(input).toHaveValue('cat([0-9]+)')
+    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 3')
+  })
+
+  test('dispatches each native find shortcut once from the input and editor', async() => {
+    await placeSelection(page, 0, 0)
+    await openFind(app, page)
+    await page.locator(inputSelector).fill('apple')
+    const counter = page.locator('.search-bar .search-result')
+    await expect(counter).toContainText('1 / 6')
+    await page.evaluate(() => {
+      const root = document.querySelector('#app') as Element & {
+        __vue_app__?: {
+          config: { globalProperties: { $pinia: { _s: Map<string, { LISTEN_FOR_EDIT(): void }> } } }
+        }
+      }
+      const store = root.__vue_app__?.config.globalProperties.$pinia._s.get('listenForMain')
+      if (!store) throw new Error('Missing edit command store')
+      store.LISTEN_FOR_EDIT()
+      store.LISTEN_FOR_EDIT()
+    })
+    const window = await app.browserWindow(page)
+    const press = async(previous = false) => {
+      await window.evaluate((window, chord) => {
+        window.webContents.sendInputEvent({ type: 'keyDown', ...chord })
+        window.webContents.sendInputEvent({ type: 'keyUp', ...chord })
+      }, {
+        keyCode: process.platform === 'darwin' ? 'G' : 'F3',
+        modifiers: [...(process.platform === 'darwin' ? ['meta'] : []), ...(previous ? ['shift'] : [])]
+      })
+    }
+    await press()
+    await expect(counter).toContainText('2 / 6')
+    await press()
+    await expect(counter).toContainText('3 / 6')
+    await press(true)
+    await expect(counter).toContainText('2 / 6')
+    await page.keyboard.press('Escape')
+    await press()
+    await openFind(app, page)
+    await expect(counter).toContainText('3 / 6')
+  })
+
   test('uses Shift+Enter for previous and Enter for next', async() => {
     await placeSelection(page, 1, 0)
     await openFind(app, page)

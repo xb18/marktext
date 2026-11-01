@@ -203,8 +203,13 @@ watch(searchValue, () => {
 }, { flush: 'sync' })
 
 const prefillFromSelection = () => {
-  const selected = searchMatches.value?.selectedText
-  if (selected) {
+  const state = searchMatches.value
+  const selected = state?.selectedText
+  const activeMatch = state?.matches[state.index]
+  const selectedResult = state?.value === searchValue.value && activeMatch !== null &&
+    typeof activeMatch === 'object' && 'match' in activeMatch && activeMatch.match === selected
+  // Search-selected text must not replace the retained expression with a literal match.
+  if (selected && !selectedResult && !document.activeElement?.closest('.search-bar')) {
     prefilling = true
     searchValue.value = selected
     prefilling = false

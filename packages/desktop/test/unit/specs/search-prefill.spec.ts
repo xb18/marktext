@@ -84,7 +84,7 @@ const makeBindings = () => {
   const setSelection = (value: string) => {
     currentFile.value = { searchMatches: { matches: [], index: -1, value: '', selectedText: value } }
   }
-  return { ret, setSelection, bus: deps.bus }
+  return { ret, setSelection, currentFile, bus: deps.bus }
 }
 
 describe('find-bar prefill from selection', () => {
@@ -116,6 +116,22 @@ describe('find-bar prefill from selection', () => {
 
 
 describe('find-bar session', () => {
+  it('retains an expression when opening Replace or reopening on its selected result', () => {
+    const { ret, currentFile } = makeBindings()
+    ret.searchValue.value = 'cat([0-9]+)'
+    currentFile.value = {
+      searchMatches: {
+        value: 'cat([0-9]+)', index: 0,
+        matches: [{ match: 'cat1' }], selectedText: 'cat1'
+      }
+    }
+    ret.listenReplace()
+    expect(ret.searchValue.value).toBe('cat([0-9]+)')
+    ret.hideSearch()
+    ret.listenFind()
+    expect(ret.searchValue.value).toBe('cat([0-9]+)')
+  })
+
   it('prefills an open bar without scheduling a cursor-moving search', async() => {
     const { ret, setSelection, bus } = makeBindings()
     ret.listenFind()
