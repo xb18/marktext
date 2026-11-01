@@ -1152,8 +1152,11 @@ const updateActiveHeading = (viewportY: number): void => {
   if (positions.length) editorStore.SET_ACTIVE_HEADING(findActiveHeadingSlug(positions, viewportY))
 }
 
+let revealingAnchor = false
+
 const scrollToCursor = (duration = 300) => {
   nextTick(() => {
+    if (revealingAnchor) return
     const container = getScrollContainer()
     if (!container) return
     const y = getCursorY()
@@ -1179,22 +1182,20 @@ const scrollToCords = (y: number) => {
     if (!container) return
     container.style.visibility = 'visible'
     container.style.pointerEvents = 'auto'
-    container.scrollTop = y
+    if (!revealingAnchor) container.scrollTop = y
   })
 }
 
-// Smoothly scroll the editor so `anchor` sits at the standard caret offset.
-// Shared by search highlights and non-heading in-document anchors.
-const scrollElementIntoView = (anchor: Element | null | undefined, duration = 300) => {
-  const container = getScrollContainer()
-  if (!container || !anchor) return
-  const { y } = anchor.getBoundingClientRect()
-  animatedScrollTo(container, container.scrollTop + y - STANDAR_Y, duration)
+const revealAnchor = (container: HTMLElement, top: number) => {
+  // A tab's deferred caret/viewport restoration must not cancel its link destination.
+  revealingAnchor = true
+  animatedScrollTo(container, top, 300, () => { revealingAnchor = false })
 }
 
 const scrollToSearchResult = () => {
   const container = getScrollContainer()
   if (!container) return
+  revealingAnchor = false
   // A rapid find command supersedes any pending caret or navigation animation.
   animatedScrollTo(container, container.scrollTop, 0)
   const highlight = container.querySelector('.mu-highlight')
@@ -1220,14 +1221,15 @@ const scrollToHeader = (slug: unknown) => {
   const heading = resolveTocHeadingElement(container, editorStore.listToc, slug)
   if (!heading) return
   editor.value?.revealElement(heading)
-  animatedScrollTo(container, getTocHeadingScrollTop(container, heading), 300)
+  revealAnchor(container, getTocHeadingScrollTop(container, heading))
 }
 
 // Custom anchors are resolved separately from heading slugs.
 const scrollToAnchorElement = (element: unknown) => {
   if (element instanceof Element) {
     editor.value?.revealElement(element)
-    scrollElementIntoView(element)
+    const container = getScrollContainer()
+    if (container) revealAnchor(container, container.scrollTop + element.getBoundingClientRect().y - STANDAR_Y)
   }
 }
 
@@ -1483,6 +1485,7 @@ interface FileChangePayload {
 }
 
 const handleFileChange = (payload: unknown) => {
+  revealingAnchor = false
   const {
     id,
     markdown: newMarkdown,
@@ -1988,7 +1991,8 @@ onMounted(() => {
       // `scrollTop` at once, moving the headings out from under `y`.
       updateActiveHeading(y)
 
-      if (typewriter.value && !updatingSearchSelection) {
+      const followCaret = !updatingSearchSelection && !revealingAnchor
+      if (typewriter.value && followCaret) {
         const startPosition = container.scrollTop
         const toPosition = startPosition + y - STANDAR_Y
 
@@ -2000,10 +2004,10 @@ onMounted(() => {
 
       // Used to fix #628: auto scroll cursor to visible if the cursor is too low.
       // Find reveals its active match after restoring focus to the search input.
-      if (!updatingSearchSelection && container.clientHeight - y < 100) {
+      if (followCaret && container.clientHeight - y < 100) {
         const editableHeight = container.clientHeight - 100
         animatedScrollTo(container, container.scrollTop + (y - editableHeight), 0)
-      } else if (!updatingSearchSelection && y < 100) {
+      } else if (followCaret && y < 100) {
         // Symmetric to #628: scroll up when the cursor rises above the top edge
         // (e.g. Arrow-Up), otherwise the caret leaves the viewport (#3329).
         animatedScrollTo(container, container.scrollTop + (y - 100), 0)

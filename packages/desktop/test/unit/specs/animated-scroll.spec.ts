@@ -30,6 +30,15 @@ function frame(time: number): void {
 }
 
 describe('animatedScrollTo', () => {
+  it.each([[100, 0], [4, 300], [0, 300]])('completes an immediate scroll to %s with duration %s', (to, duration) => {
+    const element = document.createElement('div')
+    const complete = vi.fn()
+    animatedScrollTo(element, to, duration, complete)
+    expect(element.scrollTop).toBe(to)
+    expect(complete).toHaveBeenCalledOnce()
+    expect(callbacks.size).toBe(0)
+  })
+
   it('a newer destination replaces an in-flight animation without jumping back', () => {
     const element = document.createElement('div')
     const superseded = vi.fn()

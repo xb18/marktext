@@ -148,6 +148,7 @@ export const animatedScrollTo = function(
 
   if (Math.abs(change) <= 6 || duration === 0) {
     element.scrollTop = to
+    callback?.()
     return
   }
 
