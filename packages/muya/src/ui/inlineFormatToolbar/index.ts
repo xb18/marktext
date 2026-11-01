@@ -110,6 +110,10 @@ export class InlineFormatToolbar extends BaseFloat {
         super.listen();
 
         eventCenter.subscribe('selection-change', ({ selection }) => this._syncSelection(selection));
+        eventCenter.attachDOMEvent(document, 'focusin', () => {
+            if (this._hasExternalFocus())
+                this.hide();
+        });
         eventCenter.attachDOMEvent(domNode, 'mousedown', () => {
             this._dragging = true;
             this.hide();
@@ -147,13 +151,19 @@ export class InlineFormatToolbar extends BaseFloat {
         });
     }
 
+    private _hasExternalFocus(): boolean {
+        const focused = document.activeElement;
+        return focused !== null && focused !== document.body
+            && !this.muya.domNode.contains(focused) && !this.container?.contains(focused);
+    }
+
     private _syncSelection(selection: TSelection | null) {
         if (selection?.kind !== SelectionType.TEXT) {
             this.hide();
             return;
         }
         const { anchorBlock, formats, isCollapsed, isSelectionInSameBlock, selectionCoords } = selection.context;
-        if (this._dragging || this.muya.editor.isComposing || this.muya.isReadOnly
+        if (this._dragging || this.muya.editor.isComposing || this.muya.isReadOnly || this._hasExternalFocus()
             || isCollapsed || !isSelectionInSameBlock
             || !(anchorBlock instanceof Format) || !selectionCoords) {
             this.hide();

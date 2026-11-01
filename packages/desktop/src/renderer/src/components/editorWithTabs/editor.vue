@@ -1034,7 +1034,15 @@ const handleSearch = (payload: unknown) => {
   if (!editor.value) return
   const { value, opt } = payload as { value: string; opt?: ISearchOption }
   editorStore.SEARCH(toSearchMatches(editor.value.search(value, opt)))
-  scrollToHighlight()
+  if (opt?.selectHighlight) scrollToHighlight()
+}
+
+const handleSearchVisibility = (visible: unknown) => {
+  if (!editor.value) return
+  editorStore.SEARCH(toSearchMatches(editor.value.setSearchVisible(visible === true)))
+  if (visible === false && document.activeElement?.closest('.search-bar')) {
+    editor.value.domNode.focus({ preventScroll: true })
+  }
 }
 
 const handReplace = (payload: unknown) => {
@@ -1045,8 +1053,9 @@ const handReplace = (payload: unknown) => {
 
 const handleFindAction = (action: unknown) => {
   if (!editor.value) return
-  editorStore.SEARCH(toSearchMatches(editor.value.find(action as 'previous' | 'next')))
-  scrollToHighlight()
+  const result = editor.value.find(action as 'previous' | 'next')
+  editorStore.SEARCH(toSearchMatches(result))
+  if (result.matches.length) scrollToCursor()
 }
 
 const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
@@ -1824,6 +1833,7 @@ onMounted(() => {
   bus.on('paragraph', handleEditParagraph)
   bus.on('format', handleInlineFormat)
   bus.on('searchValue', handleSearch)
+  bus.on('search-visibility', handleSearchVisibility)
   bus.on('replaceValue', handReplace)
   bus.on('find-action', handleFindAction)
   bus.on('insert-image', insertImage)
@@ -1916,7 +1926,6 @@ onMounted(() => {
   // count/index come from a snapshot the search handlers own.
   editor.value.on('search-refreshed', (result: unknown) => {
     editorStore.SEARCH(toSearchMatches(result))
-    scrollToHighlight()
   })
 
   editor.value.on('preview-diagram', (payload: IPreviewDiagramPayload) => {
@@ -1994,6 +2003,7 @@ onBeforeUnmount(() => {
   bus.off('paragraph', handleEditParagraph)
   bus.off('format', handleInlineFormat)
   bus.off('searchValue', handleSearch)
+  bus.off('search-visibility', handleSearchVisibility)
   bus.off('replaceValue', handReplace)
   bus.off('find-action', handleFindAction)
   bus.off('insert-image', insertImage)

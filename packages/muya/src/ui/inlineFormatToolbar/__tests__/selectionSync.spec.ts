@@ -67,6 +67,21 @@ function emitSelectionChange(
 }
 
 describe('inlineFormatToolbar self-syncs its highlight on selection-change', () => {
+    it('hides while an external find input owns focus and ignores its retained editor selection', () => {
+        const muya = bootMuya('hello world\n');
+        const toolbar = new InlineFormatToolbar(muya);
+        emitSelectionChange(muya, []);
+        const selection = muya.getSelection();
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        input.focus();
+
+        expect(toolbar.status).toBe(false);
+        muya.eventCenter.emit('selection-change', { selection, docChanged: false });
+        expect(toolbar.status).toBe(false);
+        input.remove();
+    });
+
     it('lights up bold when a selection-change reports strong while the toolbar is open', () => {
         const muya = bootMuya('hello world\n');
         const toolbar = new InlineFormatToolbar(muya);

@@ -6,18 +6,8 @@ import { parse, compileScript } from 'vue/compiler-sfc'
 import ts from 'typescript'
 import { ref, computed, watch, nextTick } from 'vue'
 
-// Regression guard for the find-bar prefill race (issue: the input showed a
-// stale single char like "T" instead of the selection). The bug lives entirely
-// in search/index.vue's reactive logic: `watch(searchMatches)` mirrors the
-// editor selection into the input, but when the find bar opens it steals focus
-// and the engine emits a spurious selection-change pointing at the document
-// start, which clobbers the just-prefilled value.
-//
-// The desktop unit runner ships no @vitejs/plugin-vue / @vue/test-utils, so we
-// compile the real <script setup> at runtime, swap its imports for injected
-// stubs (but keep Vue's *real* ref/computed/watch/nextTick), run setup() to grab
-// the live bindings, and drive the actual reactive code. This mirrors the
-// approach in source-code-image-action.spec.ts.
+// Moving focus to Find previously let a native selection event overwrite the
+// prefilled query. Exercise the component's setup with real Vue reactivity.
 
 const here = dirname(fileURLToPath(import.meta.url))
 const vuePath = resolve(here, '../../../src/renderer/src/components/search/index.vue')
@@ -26,6 +16,11 @@ interface Bindings {
   searchValue: { value: string }
   showSearch: { value: boolean }
   listenFind: () => void
+  listenReplace: () => void
+  hideSearch: () => void
+  handleEnterKey: (event: KeyboardEvent) => void
+  replaceValue: { value: string }
+  searchFn: (selectHighlight?: boolean) => void
 }
 
 const loadComponent = (deps: Record<string, unknown>) => {
@@ -58,7 +53,7 @@ const loadComponent = (deps: Record<string, unknown>) => {
 const makeBindings = () => {
   // currentFile.searchMatches is the channel SELECTION_CHANGE writes the
   // selected text into; storeToRefs hands the component a ref to it.
-  const currentFile = ref<{ searchMatches: { matches: unknown[]; index: number; value: string } } | null>({
+  const currentFile = ref<{ searchMatches: { matches: unknown[]; index: number; value: string; selectedText?: string } } | null>({
     searchMatches: { matches: [], index: -1, value: '' }
   })
   const deps = {
@@ -81,14 +76,14 @@ const makeBindings = () => {
     useEditorStore: () => new Proxy({}, { get: () => () => {} }),
     storeToRefs: () => ({ currentFile }),
     useI18n: () => ({ t: (k: string) => k }),
-    debounce: (fn: (...a: unknown[]) => unknown) => fn
+    debounce: (fn: (...a: unknown[]) => unknown) => Object.assign(fn, { cancel: vi.fn(), flush: vi.fn() })
   }
   const comp = loadComponent(deps)
   const ret = comp.setup({}, { expose: () => {} })
   const setSelection = (value: string) => {
-    currentFile.value = { searchMatches: { matches: [], index: -1, value } }
+    currentFile.value = { searchMatches: { matches: [], index: -1, value: '', selectedText: value } }
   }
-  return { ret, setSelection }
+  return { ret, setSelection, bus: deps.bus }
 }
 
 describe('find-bar prefill from selection', () => {
@@ -115,5 +110,66 @@ describe('find-bar prefill from selection', () => {
     await nextTick()
     expect(ret.showSearch.value).toBe(true)
     expect(ret.searchValue.value).toBe('fox')
+  })
+})
+
+
+describe('find-bar session', () => {
+  it('prefills an open bar without scheduling a cursor-moving search', async() => {
+    const { ret, setSelection, bus } = makeBindings()
+    ret.listenFind()
+    await nextTick()
+    setSelection('banana')
+    bus.emit.mockClear()
+    ret.listenFind()
+    expect(bus.emit).toHaveBeenCalledWith('searchValue', {
+      value: 'banana',
+      opt: expect.objectContaining({ selectHighlight: false })
+    })
+    expect(bus.emit).not.toHaveBeenCalledWith('searchValue', {
+      value: 'banana',
+      opt: expect.objectContaining({ selectHighlight: true })
+    })
+  })
+
+  it('keeps the query when the editor selection changes while hidden', async() => {
+    const { ret, setSelection } = makeBindings()
+    ret.searchValue.value = 'apple'
+    setSelection('banana')
+    await nextTick()
+    expect(ret.searchValue.value).toBe('apple')
+    ret.listenFind()
+    expect(ret.searchValue.value).toBe('banana')
+  })
+
+  it('hides without clearing either input and opens without moving the editor cursor', async() => {
+    const { ret, bus } = makeBindings()
+    ret.searchValue.value = 'apple'
+    ret.replaceValue.value = 'pear'
+    ret.listenFind()
+    await nextTick()
+    bus.emit.mockClear()
+    ret.hideSearch()
+    expect(ret.showSearch.value).toBe(false)
+    expect(ret.searchValue.value).toBe('apple')
+    expect(ret.replaceValue.value).toBe('pear')
+    expect(bus.emit).toHaveBeenCalledWith('search-visibility', false)
+    expect(bus.emit).not.toHaveBeenCalledWith('searchValue', expect.objectContaining({ value: '' }))
+    ret.listenFind()
+    expect(bus.emit).toHaveBeenCalledWith('searchValue', {
+      value: 'apple',
+      opt: expect.objectContaining({ selectHighlight: false })
+    })
+  })
+
+  it('uses Shift+Enter for the previous result and ignores IME confirmation', () => {
+    const { ret, bus } = makeBindings()
+    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
+    expect(bus.emit).toHaveBeenLastCalledWith('find-action', 'previous')
+    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(bus.emit).toHaveBeenLastCalledWith('find-action', 'next')
+    bus.emit.mockClear()
+    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
+    expect(bus.emit).not.toHaveBeenCalled()
   })
 })

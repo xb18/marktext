@@ -28,7 +28,7 @@
             v-model="searchValue"
             type="text"
             :placeholder="t('search.searchPlaceholder')"
-            @keyup="handleEnterKey"
+            @keydown="handleEnterKey"
           >
           <div class="controls">
             <span class="search-result">{{ highlightIndex + 1 }} /
@@ -173,42 +173,38 @@ const searchValue = ref('')
 const replaceValue = ref('')
 const searchErrorMsg = ref('')
 const search = ref<HTMLInputElement | null>(null)
+let prefilling = false
 
 const { currentFile } = storeToRefs(editorStore)
 watch(
   () => currentFile.value?.readOnly,
   (value) => {
-    if (value) emptySearch(false)
+    if (value) hideSearch()
   }
 )
 const searchMatches = computed(() => currentFile.value?.searchMatches)
 
 watch(searchValue, () => {
-  if (!showSearch.value) return
+  if (!showSearch.value || prefilling) return
   debouncedSearchFn()
-})
+}, { flush: 'sync' })
 
-watch(searchMatches, (newValue, oldValue) => {
-  // Once the search bar is open it owns the query. Ignore editor
-  // selection-changes while open — notably the spurious selection-change the
-  // engine emits when the bar steals editor focus, which would otherwise
-  // clobber the just-prefilled value (e.g. leaving a stale single character).
-  if (showSearch.value) return
-  if (!newValue || !oldValue) return
-  const { value } = newValue
-  if (value !== oldValue.value) {
-    searchValue.value = value
-  }
-})
-
-// Seed the find input from the current selection synchronously, before the bar
-// opens and steals focus. Relying on the reactive `searchMatches` watch alone
-// races with the focus-steal selection-change and can drop the prefill.
 const prefillFromSelection = () => {
-  const selected = searchMatches.value?.value
+  const selected = searchMatches.value?.selectedText
   if (selected) {
+    prefilling = true
     searchValue.value = selected
+    prefilling = false
   }
+}
+
+const refreshSearch = () => {
+  debouncedSearchFn.cancel()
+  nextTick(() => {
+    if (!currentFile.value) return
+    bus.emit('search-visibility', showSearch.value)
+    searchFn(false)
+  })
 }
 
 const highlightIndex = computed(() => {
@@ -224,7 +220,8 @@ onMounted(() => {
   bus.on('replace', listenReplace)
   bus.on('findNext', listenFindNext)
   bus.on('findPrev', listenFindPrev)
-  document.addEventListener('click', docClick)
+  bus.on('file-loaded', refreshSearch)
+  bus.on('file-changed', refreshSearch)
   document.addEventListener('keyup', docKeyup)
   bus.on('search-blur', blurSearch)
 })
@@ -234,7 +231,9 @@ onBeforeUnmount(() => {
   bus.off('replace', listenReplace)
   bus.off('findNext', listenFindNext)
   bus.off('findPrev', listenFindPrev)
-  document.removeEventListener('click', docClick)
+  bus.off('file-loaded', refreshSearch)
+  bus.off('file-changed', refreshSearch)
+  debouncedSearchFn.cancel()
   document.removeEventListener('keyup', docKeyup)
   bus.off('search-blur', blurSearch)
 })
@@ -256,25 +255,32 @@ const toggleCtrl = (ctrl: 'isCaseSensitive' | 'isWholeWord' | 'isRegexp') => {
 
 const listenFind = () => {
   if (currentFile.value?.readOnly) return
+  debouncedSearchFn.cancel()
   prefillFromSelection()
   showSearch.value = true
   type.value = 'search'
+  bus.emit('search-visibility', true)
+  searchFn(false)
   nextTick(() => {
     search.value?.focus()
     // Select the existing term so re-opening Find types over it instead of
     // appending to the previous query (#3458).
     search.value?.select()
-    if (searchValue.value) {
-      searchFn()
-    }
   })
 }
 
 const listenReplace = () => {
   if (currentFile.value?.readOnly) return
+  debouncedSearchFn.cancel()
   prefillFromSelection()
   showSearch.value = true
   type.value = 'replace'
+  bus.emit('search-visibility', true)
+  searchFn(false)
+  nextTick(() => {
+    search.value?.focus()
+    search.value?.select()
+  })
 }
 
 const listenFindNext = () => {
@@ -286,25 +292,19 @@ const listenFindPrev = () => {
 }
 
 const docKeyup = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') {
-    emptySearch()
+  if (event.key === 'Escape' && !event.isComposing && showSearch.value) {
+    hideSearch()
   }
 }
 
-const docClick = (event: MouseEvent) => {
+const blurSearch = () => hideSearch()
+
+const hideSearch = () => {
   if (!showSearch.value) return
-  const target = event.target as HTMLElement | null
-  if (target && target.closest('.search-bar')) return
-  emptySearch()
-}
-
-const blurSearch = () => emptySearch()
-
-const emptySearch = (selectHighlight = true) => {
+  debouncedSearchFn.cancel()
+  searchFn(false)
   showSearch.value = false
-  searchValue.value = ''
-  replaceValue.value = ''
-  bus.emit('searchValue', { value: searchValue.value, opt: { selectHighlight } })
+  bus.emit('search-visibility', false)
 }
 
 const toggleSearchType = () => {
@@ -313,16 +313,20 @@ const toggleSearchType = () => {
 }
 
 const find = (action: 'previous' | 'next') => {
+  debouncedSearchFn.flush()
+  if (searchErrorMsg.value) return
   bus.emit('find-action', action)
 }
 
 const handleEnterKey = (event: KeyboardEvent) => {
-  if (event.key === 'Enter') {
-    find('next')
+  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault()
+    find(event.shiftKey ? 'previous' : 'next')
   }
 }
 
-const searchFn = () => {
+const searchFn = (selectHighlight = true) => {
+  searchErrorMsg.value = ''
   if (isRegexp.value) {
     // Handle invalid regexp.
     try {
@@ -348,6 +352,7 @@ const searchFn = () => {
   bus.emit('searchValue', {
     value: searchValue.value,
     opt: {
+      selectHighlight,
       isCaseSensitive: isCaseSensitive.value,
       isWholeWord: isWholeWord.value,
       isRegexp: isRegexp.value
@@ -355,7 +360,7 @@ const searchFn = () => {
   })
 }
 
-const debouncedSearchFn = debounce(searchFn, 150)
+const debouncedSearchFn = debounce(() => searchFn(), 150)
 
 const replace = (isSingle = true) => {
   bus.emit('replaceValue', {

@@ -65,7 +65,7 @@ describe('search.find() re-renders only the blocks whose active state changes', 
     it('touches just the old and the new active block when moving between blocks', () => {
         const muya = bootMuya(markdown);
         const search = muya.editor.searchModule;
-        search.search('needle');
+        search.search('needle', { selectHighlight: true });
         expect(search.matches.length).toBe(20);
 
         const touched = spyUpdates(muya);
@@ -80,7 +80,7 @@ describe('search.find() re-renders only the blocks whose active state changes', 
     it('touches one block when both matches are in the same block', () => {
         const muya = bootMuya('needle needle needle\n\nother needle\n');
         const search = muya.editor.searchModule;
-        search.search('needle');
+        search.search('needle', { selectHighlight: true });
 
         const touched = spyUpdates(muya);
         search.find('next');
@@ -93,7 +93,7 @@ describe('search.find() re-renders only the blocks whose active state changes', 
     it('keeps highlights right when wrapping from the last match to the first', () => {
         const muya = bootMuya(markdown);
         const search = muya.editor.searchModule;
-        search.search('needle');
+        search.search('needle', { selectHighlight: true });
         search.find('previous');
         expect(search.index).toBe(19);
 
