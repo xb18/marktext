@@ -148,7 +148,7 @@
       <button
         type="button"
         class="plain-button close-search"
-        :aria-label="t('dialog.close')"
+        :aria-label="`${t('dialog.close')} (Escape)`"
         aria-keyshortcuts="Escape"
         @click="hideSearch"
       >

@@ -1030,16 +1030,29 @@ const toSearchMatches = (result: unknown) => {
   }
 }
 
+let updatingSearchSelection = false
+
+const updateSearchSelection = (operation: () => ReturnType<Muya['search']>): void => {
+  updatingSearchSelection = true
+  try {
+    editorStore.SEARCH(toSearchMatches(operation()))
+  } finally {
+    updatingSearchSelection = false
+  }
+}
+
 const handleSearch = (payload: unknown) => {
   if (!editor.value) return
+  const muya = editor.value
   const { value, opt } = payload as { value: string; opt?: ISearchOption }
-  editorStore.SEARCH(toSearchMatches(editor.value.search(value, opt)))
-  if (opt?.selectHighlight) scrollToHighlight()
+  updateSearchSelection(() => muya.search(value, opt))
+  if (opt?.selectHighlight) scrollToSearchResult()
 }
 
 const handleSearchVisibility = (visible: unknown) => {
   if (!editor.value) return
-  editorStore.SEARCH(toSearchMatches(editor.value.setSearchVisible(visible === true)))
+  const muya = editor.value
+  updateSearchSelection(() => muya.setSearchVisible(visible === true))
   if (visible === false && document.activeElement?.closest('.search-bar')) {
     editor.value.domNode.focus({ preventScroll: true })
   }
@@ -1053,9 +1066,9 @@ const handReplace = (payload: unknown) => {
 
 const handleFindAction = (action: unknown) => {
   if (!editor.value) return
-  const result = editor.value.find(action as 'previous' | 'next')
-  editorStore.SEARCH(toSearchMatches(result))
-  if (result.matches.length) scrollToCursor()
+  const muya = editor.value
+  updateSearchSelection(() => muya.find(action as 'previous' | 'next'))
+  if (muya.editor.searchModule.matches.length) scrollToSearchResult()
 }
 
 const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
@@ -1169,8 +1182,25 @@ const scrollElementIntoView = (anchor: Element | null | undefined, duration = 30
   animatedScrollTo(container, container.scrollTop + y - STANDAR_Y, duration)
 }
 
-const scrollToHighlight = () => {
-  return scrollToElement('.mu-highlight')
+const scrollToSearchResult = () => {
+  const container = getScrollContainer()
+  if (!container) return
+  // A rapid find command supersedes any pending caret or navigation animation.
+  animatedScrollTo(container, container.scrollTop, 0)
+  const highlight = container.querySelector('.mu-highlight')
+  if (!highlight) {
+    scrollToCursor(0)
+    return
+  }
+  const bounds = container.getBoundingClientRect()
+  const match = highlight.getBoundingClientRect()
+  const bar = document.querySelector('.search-bar')?.getBoundingClientRect()
+  const top = Math.max(bounds.top + 20, (bar?.bottom ?? bounds.top) + 16)
+  const bottom = bounds.bottom - 20
+  if (match.top < top || match.bottom > bottom) {
+    const targetY = Math.min(STANDAR_Y, (top + bottom) / 2)
+    animatedScrollTo(container, container.scrollTop + match.top - targetY, 0)
+  }
 }
 
 /** Resolve TOC slugs against top-level headings in document order. */
@@ -1189,10 +1219,6 @@ const scrollToAnchorElement = (element: unknown) => {
     editor.value?.revealElement(element)
     scrollElementIntoView(element)
   }
-}
-
-const scrollToElement = (selector: string) => {
-  scrollElementIntoView(document.querySelector(selector))
 }
 
 interface ExportOptions {
@@ -1951,7 +1977,7 @@ onMounted(() => {
       // `scrollTop` at once, moving the headings out from under `y`.
       updateActiveHeading(y)
 
-      if (typewriter.value) {
+      if (typewriter.value && !updatingSearchSelection) {
         const startPosition = container.scrollTop
         const toPosition = startPosition + y - STANDAR_Y
 
@@ -1962,10 +1988,11 @@ onMounted(() => {
       }
 
       // Used to fix #628: auto scroll cursor to visible if the cursor is too low.
-      if (container.clientHeight - y < 100) {
+      // Find reveals its active match after restoring focus to the search input.
+      if (!updatingSearchSelection && container.clientHeight - y < 100) {
         const editableHeight = container.clientHeight - 100
         animatedScrollTo(container, container.scrollTop + (y - editableHeight), 0)
-      } else if (y < 100) {
+      } else if (!updatingSearchSelection && y < 100) {
         // Symmetric to #628: scroll up when the cursor rises above the top edge
         // (e.g. Arrow-Up), otherwise the caret leaves the viewport (#3329).
         animatedScrollTo(container, container.scrollTop + (y - 100), 0)

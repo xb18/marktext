@@ -146,6 +146,48 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator('.search-bar .replace input')).toHaveValue('pear')
   })
 
+  test('rapid Enter navigation reveals the current filler match in a long document', async() => {
+    const window = await app.browserWindow(page)
+    await window.evaluate(window => window.setContentSize(1000, 700))
+    const longDocument = Array.from({ length: 50 }, (_, i) => `Paragraph ${i + 1}: ordinary filler text for scrolling.`).join('\n\n')
+    await setSourceMarkdown(page, app, longDocument)
+    await placeSelection(page, 0, 0)
+    await openFind(app, page)
+    const input = page.locator(inputSelector)
+    await input.fill('filler')
+    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 50')
+    for (let i = 0; i < 32; i++) {
+      await input.press('Enter')
+      const visible = await page.locator('.mu-highlight').evaluate(element => {
+        const match = element.getBoundingClientRect()
+        const container = element.closest('.editor-component')?.getBoundingClientRect()
+        if (!container) throw new Error('Missing editor scroll container')
+        const bar = document.querySelector('.search-bar')?.getBoundingClientRect()
+        if (!bar) throw new Error('Missing find widget')
+        return match.top >= Math.max(container.top, bar.bottom) && match.bottom <= container.bottom
+      })
+      expect(visible, `result ${i + 2} should be visible immediately after Enter`).toBe(true)
+    }
+    await expect(page.locator('.search-bar .search-result')).toContainText('33 / 50')
+    await expect.poll(() => activeParagraph(page)).toBe('Paragraph 33: ordinary filler text for scrolling.')
+    await expect(page.locator('.mu-highlight')).toBeInViewport()
+    await expect(input).toBeFocused()
+    const scrollPositions = await page.locator('.editor-component').evaluate(container => new Promise<number[]>(resolve => {
+      const positions: number[] = []
+      const start = performance.now()
+      const sample = () => {
+        positions.push(container.scrollTop)
+        if (performance.now() - start >= 400) resolve(positions)
+        else requestAnimationFrame(sample)
+      }
+      sample()
+    }))
+    expect(Math.max(...scrollPositions) - Math.min(...scrollPositions)).toBeLessThanOrEqual(1)
+    for (let i = 0; i < 18; i++) await input.press('Shift+Enter')
+    await expect(page.locator('.search-bar .search-result')).toContainText('15 / 50')
+    await expect(page.locator('.mu-highlight')).toBeInViewport()
+  })
+
   test('reveals the next result after closing Find without moving on reopen', async() => {
     const longDocument = ['first apple', ...Array.from({ length: 60 }, (_, i) => `paragraph ${i}`), 'last apple'].join('\n\n')
     await setSourceMarkdown(page, app, longDocument)
