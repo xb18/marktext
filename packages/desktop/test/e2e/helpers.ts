@@ -110,8 +110,20 @@ export const launchElectron = async(
   // Fixture cleanup must not wait for save prompts. Test user-driven shutdown
   // through BrowserWindow.close() or app.quit() instead of app.close().
   const closeApp = app.close.bind(app)
+  // Playwright disposes the application channel after a user-driven quit.
+  const child = app.process()
   app.close = async() => {
-    await app.evaluate(({ app }) => app.exit(0)).catch(() => {})
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>(resolve => child.once('exit', () => resolve()))
+      // Shutdown can close the inspector before its reply, or leave main unresponsive.
+      const killTimer = setTimeout(() => child.kill('SIGKILL'), 5000)
+      try {
+        void app.evaluate(({ app }) => app.exit(0)).catch(() => {})
+        await exited
+      } finally {
+        clearTimeout(killTimer)
+      }
+    }
     await closeApp()
   }
   if (options.suppressErrorDialog) await installRendererErrorCounter(app)
