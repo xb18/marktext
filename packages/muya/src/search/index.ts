@@ -2,13 +2,18 @@ import type Content from '../block/base/content';
 import type TreeNode from '../block/base/treeNode';
 import type { IHighlight } from '../inlineRenderer/types';
 import type { Muya } from '../muya';
-import type { ISelectionEndpoint } from '../selection/types';
+import type { ISelectionEndpoint, TSelectionState } from '../selection/types';
 import type { IMatch, IReplaceOption, ISearchOption } from './types';
 import { unfoldAllSections } from '../block/folding';
 import { DEFAULT_SEARCH_OPTIONS } from '../config';
 import { contentPath, resolveContent } from '../selection/state';
 import { SelectionType } from '../selection/types';
 import { buildRegexValue, matchString } from '../utils/search';
+
+interface ISearchPosition {
+    block: Content;
+    offset: number;
+}
 
 export class Search {
     private _query: string = '';
@@ -17,6 +22,9 @@ export class Search {
     private _startPosition: ISelectionEndpoint | null = null;
     private _updating = false;
     private _visible = true;
+    private _dirty = false;
+    // DOM identity detects highlights cleared by editing/focus even when text is unchanged.
+    private _renderedMatches = new Map<Content, { text: string; highlights: IHighlight[]; firstChild: ChildNode | null }>();
     public matches: IMatch[] = [];
     public index: number = -1;
 
@@ -38,14 +46,19 @@ export class Search {
                 return;
             if (selection?.kind === SelectionType.TEXT)
                 this._startPosition = { path: [...selection.focus.path], offset: selection.focus.offset };
-            if (docChanged)
-                this.refresh();
+            if (docChanged && this._query) {
+                this._dirty = true;
+                if (this._visible)
+                    this.refresh();
+            }
         });
     }
 
-    private _comparePosition(a: ISelectionEndpoint, b: ISelectionEndpoint): number {
-        const first = resolveContent(this._muya, a.path)?.domNode;
-        const second = resolveContent(this._muya, b.path)?.domNode;
+    private _comparePosition(a: ISearchPosition, b: ISearchPosition): number {
+        if (a.block === b.block)
+            return a.offset - b.offset;
+        const first = a.block.domNode;
+        const second = b.block.domNode;
         if (first && second && first !== second) {
             const order = first.compareDocumentPosition(second);
             if (order & Node.DOCUMENT_POSITION_FOLLOWING)
@@ -53,14 +66,16 @@ export class Search {
             if (order & Node.DOCUMENT_POSITION_PRECEDING)
                 return 1;
         }
-        for (let i = 0; i < Math.min(a.path.length, b.path.length); i++) {
-            if (a.path[i] !== b.path[i]) {
-                return typeof a.path[i] === 'number' && typeof b.path[i] === 'number'
-                    ? Number(a.path[i]) - Number(b.path[i])
-                    : String(a.path[i]).localeCompare(String(b.path[i]));
+        const aPath = contentPath(a.block);
+        const bPath = contentPath(b.block);
+        for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
+            if (aPath[i] !== bPath[i]) {
+                return typeof aPath[i] === 'number' && typeof bPath[i] === 'number'
+                    ? Number(aPath[i]) - Number(bPath[i])
+                    : String(aPath[i]).localeCompare(String(bPath[i]));
             }
         }
-        return a.path.length - b.path.length || a.offset - b.offset;
+        return aPath.length - bPath.length || a.offset - b.offset;
     }
 
     private _restoreExternalFocus(focused: Element | null): void {
@@ -76,11 +91,11 @@ export class Search {
         this._restoreExternalFocus(focused);
     }
 
-    private _findMatchIndex(position: ISelectionEndpoint, action: 'next' | 'previous', skipEmpty = false): number {
+    private _findMatchIndex(position: ISearchPosition, action: 'next' | 'previous', skipEmpty = false): number {
         for (let i = action === 'next' ? 0 : this.matches.length - 1; i >= 0 && i < this.matches.length; i += action === 'next' ? 1 : -1) {
             const match = this.matches[i];
             const offset = action === 'next' ? match.start : match.end;
-            const order = this._comparePosition({ path: contentPath(match.block), offset }, position);
+            const order = this._comparePosition({ block: match.block, offset }, position);
             if (skipEmpty && match.start === match.end && order === 0)
                 continue;
             if (action === 'next' ? order >= 0 : order <= 0)
@@ -97,6 +112,10 @@ export class Search {
         this._updating = true;
         try {
             this._visible = visible;
+            if (visible && this._dirty) {
+                this.refresh();
+                return this;
+            }
             this._updateMatches();
             if (selection)
                 this._muya.editor.selection.setSelection(selection);
@@ -115,11 +134,12 @@ export class Search {
         this.matches = [];
         this.index = -1;
         this._startPosition = null;
+        this._dirty = false;
+        this._renderedMatches.clear();
     }
 
-    // `blocks` limits the re-render to those blocks; omitted, every block with
-    // a match is re-rendered.
-    private _updateMatches(isClear = false, blocks?: Set<Content>) {
+    // Limit navigation to its old/new blocks; refresh also clears blocks that lost matches.
+    private _updateMatches(blocks?: Set<Content>) {
         const { matches, index } = this;
         let i;
         const len = matches.length;
@@ -127,7 +147,7 @@ export class Search {
 
         for (i = 0; i < len; i++) {
             const { block, start, end } = matches[i];
-            if (blocks && !blocks.has(block))
+            if (!this._visible || (blocks && !blocks.has(block)))
                 continue;
 
             const active = i === index;
@@ -143,21 +163,40 @@ export class Search {
             }
         }
 
-        for (const [block, highlights] of matchesMap.entries()) {
-            if (!block.outMostBlock)
-                continue;
+        const targets = blocks ?? new Set([...this._renderedMatches.keys(), ...matchesMap.keys()]);
+        for (const block of targets)
+            this._renderHighlights(block, matchesMap.get(block) ?? []);
+    }
 
-            const isActive = highlights.some(h => h.active);
-
-            block.update(undefined, isClear || !this._visible ? [] : highlights);
-
-            if (block.parent?.active && !isActive)
-                block.blurHandler();
-
-            if (isActive && !isClear && this._visible) {
-                block.focusHandler();
-            }
+    private _renderHighlights(block: Content, highlights: IHighlight[]): void {
+        if (!block.outMostBlock) {
+            this._renderedMatches.delete(block);
+            return;
         }
+
+        const previous = this._renderedMatches.get(block);
+        if (!previous && !highlights.length)
+            return;
+        if (previous?.text === block.text && previous.firstChild === block.domNode?.firstChild
+            && previous.highlights.length === highlights.length
+            && highlights.every((h, i) => h.start === previous.highlights[i].start
+                && h.end === previous.highlights[i].end && h.active === previous.highlights[i].active)) {
+            return;
+        }
+
+        const isActive = highlights.some(h => h.active);
+        block.update(undefined, highlights);
+
+        if (block.parent?.active && !isActive)
+            block.blurHandler();
+
+        if (isActive) {
+            block.focusHandler();
+        }
+        if (highlights.length)
+            this._renderedMatches.set(block, { text: block.text, highlights, firstChild: block.domNode?.firstChild ?? null });
+        else
+            this._renderedMatches.delete(block);
     }
 
     private _innerReplace(matches: IMatch[], replacementOf: (match: IMatch) => string) {
@@ -190,6 +229,8 @@ export class Search {
     replace(replaceValue: string, opt: IReplaceOption = { isSingle: true, isRegexp: false }) {
         if (!this._muya.canMutate)
             return this;
+        if (this._dirty)
+            this.search(this._query, { ...this._options, selectHighlight: false });
         const { isSingle, isRegexp, fromSelection, ...rest } = opt;
         const options = Object.assign({}, this._options, rest, { isRegexp });
         const { matches, index } = this;
@@ -226,9 +267,8 @@ export class Search {
             const end = forward ? selection.focus : selection.anchor;
             index = this._findMatchIndex(start, 'next');
             const match = this.matches[index];
-            const path = contentPath(match.block);
-            selectedMatch = this._comparePosition(start, { path, offset: match.start }) === 0
-                && this._comparePosition(end, { path, offset: match.end }) === 0;
+            selectedMatch = start.block === match.block && end.block === match.block
+                && start.offset === match.start && end.offset === match.end;
         }
         if (!selectedMatch) {
             this.search(this._query, { ...options, highlightIndex: index, selectHighlight: true });
@@ -241,7 +281,8 @@ export class Search {
         try {
             this._innerReplace([match], () => replacement);
             const offset = match.start + replacement.length;
-            match.block.setCursor(offset, offset);
+            // Native selection offsets must be resolved against the replacement's DOM.
+            match.block.setCursor(offset, offset, true);
             this._restoreExternalFocus(focused);
             this.search(this._query, { ...options, selectHighlight: false });
             this.find('next');
@@ -252,6 +293,8 @@ export class Search {
     }
 
     find(action: 'previous' | 'next'): this {
+        if (this._dirty)
+            this.search(this._query, { ...this._options, selectHighlight: false });
         const { matches } = this;
         let { index } = this;
         const len = matches.length;
@@ -263,10 +306,19 @@ export class Search {
         if (selection) {
             const { anchor, focus } = selection;
             const forward = this._comparePosition(anchor, focus) <= 0;
+            const start = forward ? anchor : focus;
+            const end = forward ? focus : anchor;
+            const active = matches[index];
             const position = action === 'next'
-                ? (forward ? focus : anchor)
-                : (forward ? anchor : focus);
-            index = this._findMatchIndex(position, action, true);
+                ? end
+                : start;
+            if (active && start.block === active.block && end.block === active.block
+                && start.offset === active.start && end.offset === active.end) {
+                index += action === 'next' ? 1 : -1;
+            }
+            else {
+                index = this._findMatchIndex(position, action, true);
+            }
         }
         else {
             index = action === 'next' ? index + 1 : index - 1;
@@ -287,8 +339,7 @@ export class Search {
 
         this._updating = true;
         try {
-            this._updateMatches(true, changed);
-            this._updateMatches(false, changed);
+            this._updateMatches(changed);
             this._selectMatch(matches[index]);
         }
         finally {
@@ -319,15 +370,13 @@ export class Search {
         const matches: IMatch[] = [];
         this._options = Object.assign({}, DEFAULT_SEARCH_OPTIONS, opts);
         this._query = query;
+        this._dirty = false;
         const { highlightIndex, selectHighlight } = this._options;
-        let index = -1;
 
         const prevActiveMatch = this.matches[this.index];
 
-        if (query && this._scrollPage)
+        if (query && this._visible && this._scrollPage)
             unfoldAllSections(this._scrollPage);
-
-        this._updateMatches(true);
 
         if (query) {
             this._scrollPage?.depthFirstTraverse((block: TreeNode) => {
@@ -351,22 +400,7 @@ export class Search {
             });
         }
 
-        if (typeof highlightIndex === 'number' && highlightIndex !== -1) {
-            index = Math.min(highlightIndex, matches.length - 1);
-        }
-        else if (matches.length) {
-            const start = this._startPosition;
-            index = start ? matches.findIndex(match => this._comparePosition({ path: contentPath(match.block), offset: match.start }, start) >= 0) : 0;
-            if (index < 0)
-                index = 0;
-            if (!selectHighlight && selection?.kind === SelectionType.TEXT) {
-                const selectedIndex = matches.findIndex(match => this._comparePosition({ path: contentPath(match.block), offset: match.start }, selection.anchor) === 0
-                    && this._comparePosition({ path: contentPath(match.block), offset: match.end }, selection.focus) === 0);
-                if (selectedIndex >= 0)
-                    index = selectedIndex;
-            }
-        }
-
+        const index = this._searchIndex(matches, highlightIndex, selectHighlight ? null : selection);
         Object.assign(this, { matches, index });
 
         this._updateMatches();
@@ -384,11 +418,35 @@ export class Search {
         return this;
     }
 
-    /** Re-run the active query on the blocks a full re-render just rebuilt. */
+    private _searchIndex(matches: IMatch[], highlightIndex: number | undefined, selection: TSelectionState | null): number {
+        if (typeof highlightIndex === 'number' && highlightIndex !== -1)
+            return Math.min(highlightIndex, matches.length - 1);
+        if (!matches.length)
+            return -1;
+        if (selection?.kind === SelectionType.TEXT) {
+            const anchor = resolveContent(this._muya, selection.anchor.path);
+            const focus = resolveContent(this._muya, selection.focus.path);
+            const selectedIndex = matches.findIndex(match => match.block === anchor && match.block === focus
+                && match.start === selection.anchor.offset && match.end === selection.focus.offset);
+            if (selectedIndex >= 0)
+                return selectedIndex;
+        }
+        const origin = this._startPosition;
+        const block = origin ? resolveContent(this._muya, origin.path) : null;
+        const start = block && origin ? { block, offset: origin.offset } : null;
+        const index = start ? matches.findIndex(match => this._comparePosition({ block: match.block, offset: match.start }, start) >= 0) : 0;
+        return index < 0 ? 0 : index;
+    }
+
+    /** Refresh visible results; defer hidden results until reopening or navigation. */
     refresh(): this {
         const { _query: query, _options: options, index: highlightIndex } = this;
 
         if (!query) {
+            return this;
+        }
+        if (!this._visible) {
+            this._dirty = true;
             return this;
         }
 
