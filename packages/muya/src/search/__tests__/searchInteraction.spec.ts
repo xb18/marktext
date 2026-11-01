@@ -120,6 +120,18 @@ describe('find interaction', () => {
         input.remove();
     });
 
+    it('keeps external focus while refreshing retained highlights', () => {
+        blocks()[0].setCursor(0, 0);
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        input.focus();
+        muya.search('apple');
+        expect(document.activeElement).toBe(input);
+        muya.editor.searchModule.refresh();
+        expect(document.activeElement).toBe(input);
+        input.remove();
+    });
+
     it('refreshes matches after editing without moving the caret', async () => {
         muya.search('apple', { selectHighlight: true });
         blocks()[1].text = 'banana pear';

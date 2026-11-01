@@ -59,11 +59,17 @@ export class Search {
         return a.path.length - b.path.length || a.offset - b.offset;
     }
 
+    private _restoreExternalFocus(focused: Element | null): void {
+        if (focused instanceof HTMLElement && focused !== document.body && focused.isConnected
+            && !this._muya.domNode.contains(focused)) {
+            focused.focus({ preventScroll: true });
+        }
+    }
+
     private _selectMatch(match: IMatch) {
         const focused = document.activeElement;
         match.block.setCursor(match.start, match.end);
-        if (focused instanceof HTMLElement && !this._muya.domNode.contains(focused))
-            focused.focus({ preventScroll: true });
+        this._restoreExternalFocus(focused);
     }
 
     private _findMatchIndex(position: ISelectionEndpoint, action: 'next' | 'previous', skipEmpty = false): number {
@@ -249,6 +255,7 @@ export class Search {
     }
 
     search(query: string, opts: ISearchOption = {}) {
+        const focused = document.activeElement;
         const selection = this._muya.editor.selection.getSelectionState();
         if (!this._startPosition && selection?.kind === SelectionType.TEXT)
             this._startPosition = { path: [...selection.focus.path], offset: selection.focus.offset };
@@ -258,6 +265,8 @@ export class Search {
         }
         finally {
             this._updating = false;
+            // Restoring a DOM selection can focus the editor even without selecting a match.
+            this._restoreExternalFocus(focused);
         }
     }
 
