@@ -210,10 +210,9 @@ watch(searchValue, () => {
   debouncedSearchFn()
 }, { flush: 'sync' })
 
-const prefillFromSelection = (includeWord = true, fromNavigation = false) => {
-  if (!fromNavigation && document.activeElement?.closest('.search-bar')) return
-  const state = searchMatches.value
-  const selected = state?.selectedText || (includeWord ? state?.wordAtCursor : '')
+const prefillFromSelection = () => {
+  if (document.activeElement?.closest('.search-bar')) return
+  const selected = searchMatches.value?.selectedText
   if (!selected || selected.includes('\n')) return
   prefilling = true
   searchValue.value = isRegexp.value ? escapeRegExp(selected) : selected
@@ -301,7 +300,7 @@ const listenReplace = () => {
   const selected = searchMatches.value?.selectedText
   const hasSingleLineSelection = !!selected && !selected.includes('\n')
   const focusReplacement = document.activeElement === search.value || hasSingleLineSelection
-  prefillFromSelection(false)
+  prefillFromSelection()
   showSearch.value = true
   type.value = 'replace'
   bus.emit('search-visibility', true)
@@ -316,11 +315,14 @@ const listenReplace = () => {
 const navigate = (action: 'previous' | 'next') => {
   if (currentFile.value?.readOnly) return
   if (!showSearch.value) {
-    if (!searchValue.value) prefillFromSelection()
     type.value = 'search'
     showSearch.value = true
     bus.emit('search-visibility', true)
     searchFn(false)
+  }
+  if (!searchValue.value) {
+    nextTick(() => search.value?.focus())
+    return
   }
   find(action)
 }
@@ -353,11 +355,7 @@ const toggleSearchType = () => {
 
 const find = (action: 'previous' | 'next') => {
   debouncedSearchFn.flush()
-  if (!searchValue.value) {
-    prefillFromSelection(true, true)
-    searchFn(false)
-  }
-  if (searchErrorMsg.value) return
+  if (!searchValue.value || searchErrorMsg.value) return
   bus.emit('find-action', action)
 }
 

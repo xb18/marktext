@@ -43,7 +43,6 @@ export interface FileSearchMatches {
   matches: unknown[]
   value: string
   selectedText?: string
-  wordAtCursor?: string
 }
 
 /** Live renderer tab state; recovery data is captured through window checkpoints. */

@@ -90,6 +90,14 @@ const makeBindings = () => {
 }
 
 describe('find-bar prefill from selection', () => {
+  it.each(['', '此前的查询'])('keeps query %j when no text is selected', (query) => {
+    const { ret, setSelection } = makeBindings()
+    ret.searchValue.value = query
+    setSelection('')
+    ret.listenFind()
+    expect(ret.searchValue.value).toBe(query)
+  })
+
   it('prefills the input with the selected text when the bar opens', async() => {
     const { ret, setSelection } = makeBindings()
     setSelection('fox')
@@ -178,8 +186,17 @@ describe('find-bar session', () => {
     })
   })
 
+  it('does not navigate or seed a query on Enter while the input is empty', () => {
+    const { ret, bus, setSelection } = makeBindings()
+    setSelection('原来的选区')
+    ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(ret.searchValue.value).toBe('')
+    expect(bus.emit).not.toHaveBeenCalledWith('find-action', expect.anything())
+  })
+
   it('uses Shift+Enter for the previous result and ignores IME confirmation', () => {
     const { ret, bus } = makeBindings()
+    ret.searchValue.value = 'apple'
     ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
     expect(bus.emit).toHaveBeenLastCalledWith('find-action', 'previous')
     ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter' }))

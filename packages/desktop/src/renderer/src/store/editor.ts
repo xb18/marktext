@@ -1,6 +1,5 @@
 import equal from 'deep-equal'
 import { adjustTrailingNewlines } from '@/util/markdown'
-import { getFindSeedWord } from '@/util/findSeed'
 import { prepareReading, applyReadOnly } from '../services/documentMode'
 import bus from '../bus'
 import { getUniqueId, deepClone } from '../util'
@@ -499,8 +498,7 @@ export const useEditorStore = defineStore('editor', {
       if (!this.currentFile) return
       this.currentFile.searchMatches = {
         ...deepClone(value),
-        selectedText: this.currentFile.searchMatches.selectedText ?? '',
-        wordAtCursor: this.currentFile.searchMatches.wordAtCursor ?? ''
+        selectedText: this.currentFile.searchMatches.selectedText ?? ''
       }
     },
 
@@ -1190,12 +1188,8 @@ export const useEditorStore = defineStore('editor', {
       if (this.currentFile && start.key === end.key && start.block?.text) {
         const value = start.block.text.substring(start.offset, end.offset)
         this.currentFile.searchMatches.selectedText = value
-        this.currentFile.searchMatches.wordAtCursor = start.offset === end.offset
-          ? getFindSeedWord(start.block.text, start.offset)
-          : ''
       } else if (this.currentFile) {
         this.currentFile.searchMatches.selectedText = ''
-        this.currentFile.searchMatches.wordAtCursor = ''
       }
 
       const { windowId } = window.marktext?.env ?? { windowId: -1 }

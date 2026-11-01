@@ -213,38 +213,61 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator('.search-bar .replace input')).toHaveValue('pear')
   })
 
-  test('reveals Find on a first navigation command and seeds the word at the caret', async() => {
-    await placeSelection(page, 0, 8)
-    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findNext')
-    await expect(page.locator('.search-bar')).toBeVisible()
-    await expect(page.locator(inputSelector)).toHaveValue('apple')
-    await expect(page.locator('.search-bar .search-result')).toContainText('2 / 6')
-    await expect(page.locator('.mu-editor')).toBeFocused()
-    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
+  for (const [label, text, offset] of [
+    ['English', 'first apple apple', 8],
+    ['Chinese', '这是一段没有空格的中文正文。', 4]
+  ] as const) {
+    test(`does not prefill from a collapsed ${label} caret`, async() => {
+      await setSourceMarkdown(page, app, text)
+      await placeSelection(page, 0, offset)
+      await openFind(app, page)
+      const input = page.locator(inputSelector)
+      await expect(input).toHaveValue('')
+      for (const action of ['findNext', 'findPrev'] as const) {
+        await page.keyboard.press('Escape')
+        await sendIpcToRenderer(app, 'mt::editor-edit-action', action)
+        await expect(page.locator('.search-bar')).toBeVisible()
+        await expect(input).toHaveValue('')
+        await expect(input).toBeFocused()
+        await expect(page.locator('.search-bar .search-result')).toContainText('0 / 0')
+        await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
+      }
+    })
+  }
+
+  test('keeps the retained query when reopening at a Chinese caret without a selection', async() => {
+    await setSourceMarkdown(page, app, 'apple\n\n这是一段没有空格的中文正文。')
+    await placeSelection(page, 0, 0)
+    await openFind(app, page)
+    const input = page.locator(inputSelector)
+    await input.fill('apple')
+    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 1')
     await page.keyboard.press('Escape')
-    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findPrev')
-    await expect(page.locator('.search-bar')).toBeVisible()
-    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 6')
-    await expect(page.locator('.mu-editor')).toBeFocused()
-    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
+    await placeSelection(page, 1, 4)
+    await openFind(app, page)
+    await expect(input).toHaveValue('apple')
+    await expect(page.locator('.search-bar .search-result')).toContainText('1 / 1')
   })
 
-  test('navigation from an empty visible query restores the editor selection as its term', async() => {
+  test('keeps an explicitly cleared query empty during navigation', async() => {
     await placeSelection(page, 0, 6, 11)
     await openFind(app, page)
     const input = page.locator(inputSelector)
     await input.fill('')
     await input.press('Enter')
-    await expect(input).toHaveValue('apple')
-    await expect(page.locator('.search-bar .search-result')).toContainText('2 / 6')
+    await expect(input).toHaveValue('')
+    await expect(page.locator('.search-bar .search-result')).toContainText('0 / 0')
+    await page.keyboard.press('Escape')
+    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findNext')
+    await expect(input).toHaveValue('')
     await expect(input).toBeFocused()
   })
 
-  test('seeds Find from the caret word and escapes literal selections in regex mode', async() => {
+  test('escapes an explicit literal selection in regex mode', async() => {
     await setSourceMarkdown(page, app, 'a.b aXb apple')
     await placeSelection(page, 0, 10)
     await openFind(app, page)
-    await expect(page.locator(inputSelector)).toHaveValue('apple')
+    await expect(page.locator(inputSelector)).toHaveValue('')
     await page.locator('.search-bar .is-regex').click()
     await placeSelection(page, 0, 0, 3)
     await openFind(app, page)
@@ -282,7 +305,6 @@ test.describe('Find session (#5960)', () => {
     const input = page.locator(inputSelector)
     await input.fill('apple')
     await expect(page.locator('.search-bar .search-result')).toContainText('2 / 2')
-    await input.press('Enter')
     await sendIpcToRenderer(app, 'mt::editor-edit-action', 'replace')
     const replacement = page.locator('.search-bar .replace input')
     await replacement.fill('pear')
