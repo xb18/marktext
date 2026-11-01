@@ -1,8 +1,7 @@
 # CommonMark / GFM spec conformance
 
 The current baseline below is derived from `expected-failures.json` and the
-fixture sets used by the spec runners. It replaces the PR-6a snapshot
-(CommonMark 87.7% / GFM 86.3%).
+fixture sets used by the spec runners.
 
 Re-run with `pnpm --filter @muyajs/core test:spec`. The regression lock requires
 every listed example to keep failing and every unlisted example to pass. When

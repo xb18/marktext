@@ -203,7 +203,9 @@ The block tree under `ScrollPage` is built from `TreeNode → Parent → (Conten
 
 Inline edits use `ot-text-unicode` operations nested inside `ot-json1` operations. A collaborative host must supply transport, operation transformation and synchronization; the package does not provide a complete collaboration service.
 
-Pending edits commit through `EditTransactions`. Call `muya.flush()` before reading content for persistence or switching documents. See [edit transactions](src/editor/transactions/README.md) and [selection](src/selection/README.md) for the current contracts.
+Pending edits commit through `EditTransactions`. Call `muya.flush()` before reading content for persistence or switching documents. `muya.transact(fn)` groups synchronous edits into one command; nested scopes share its undo boundary, and an exception rolls back the scope. Complete asynchronous work before entering a transaction. See [`src/editor/transactions/index.ts`](src/editor/transactions/index.ts).
+
+Runtime selections contain live blocks and DOM nodes. Persist `getSelectionState()` snapshots and restore them with `setSelection()`. Text offsets use UTF-16 code units, image ranges are half-open source ranges, and table coordinates are zero-based including the header. See [`src/selection/types.ts`](src/selection/types.ts).
 
 For a deeper, file-level walkthrough see [`AGENTS.md`](./AGENTS.md).
 
@@ -250,8 +252,7 @@ Use package-specific commands for Muya:
 | `pnpm --filter muya-e2e e2e:chromium` | Chromium browser tests; see [E2E instructions](e2e/README.md). |
 
 Follow the root [contributing guide](../../.github/CONTRIBUTING.md). The root
-Husky pre-commit hook runs lint-staged; Muya's upstream Turbo, commitlint and
-release-it setup is not part of this workspace.
+Husky pre-commit hook runs lint-staged.
 
 ## Build
 

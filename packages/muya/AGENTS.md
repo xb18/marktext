@@ -2,23 +2,21 @@
 
 This file provides guidance to AI agents when working inside `packages/muya`.
 
-> **Location.** `packages/muya` is the TypeScript rewrite of muya (upstream: <https://github.com/marktext/muya>), migrated into this marktext monorepo and published as `@muyajs/core`. The desktop renderer consumes `@muyajs/core` as its editor engine; the legacy JS engine that shipped before it has since been removed from the monorepo. `packages/muya` keeps its own toolchain (ESLint/antfu, stylelint, madge, vitest), and the marktext-root ESLint ignores `packages/muya/**` — treat it as a self-contained package with its own conventions.
+> **Location.** `packages/muya` contains the TypeScript editor engine `@muyajs/core` (upstream: <https://github.com/marktext/muya>). The desktop renderer consumes it as a workspace dependency. `packages/muya` keeps its own toolchain (ESLint/antfu, stylelint, madge, vitest), and the marktext-root ESLint ignores `packages/muya/**` — treat it as a self-contained package with its own conventions.
 
 ## Layout inside `packages/muya`
 
 - `src/` — `@muyajs/core` TypeScript source. Public API entrypoint is `src/index.ts`.
 - `test/spec/` — CommonMark / GFM conformance suites (run via `test:spec`, separate vitest config).
 - `examples/` — `muya-examples`, a Vite vanilla-TS demo that consumes `@muyajs/core` via `workspace:*`. Listed as its own workspace in the repo-root `pnpm-workspace.yaml`.
-- `e2e/` — `muya-e2e`, Playwright real-browser E2E suite. Self-contained host page under `e2e/host/`. See `e2e/README.md` and `e2e/BACKLOG.md`.
+- `e2e/` — `muya-e2e`, Playwright real-browser E2E suite. Self-contained host page under `e2e/host/`. See `e2e/README.md`.
 - `eslint.config.mjs`, `.stylelintrc`, `.madgerc` — package-local tooling. The marktext-root ESLint explicitly ignores `packages/muya/**`, so muya self-lints with its own antfu-based config.
-
-Stub packages (`packages/facade`, `packages/findReplace`) from the upstream muya monorepo were not migrated — they had no source.
 
 ## Commands
 
 Run from the marktext repo root.
 
-- `pnpm -C packages/muya/examples dev:demo` — start the examples Vite dev server. (Upstream `pnpm dev` / Turbo `dev:demo` is not wired here — run vite directly.)
+- `pnpm -C packages/muya/examples dev:demo` — start the examples Vite dev server.
 - `pnpm -C packages/muya build` — `tsc && vite build`, emits `lib/{es,umd,cjs}` and `lib/types`.
 - `pnpm -C packages/muya test` / `pnpm -C packages/muya coverage` — Vitest unit tests (co-located under `src/**/__tests__/`). Single file: `pnpm -C packages/muya exec vitest run path/to/file.test.ts`.
 - `pnpm -C packages/muya test:spec` — CommonMark 0.31 + GFM 0.29-gfm fixture suites against `renderToStaticHTML(..., { sanitize: false })`. `test:spec:commonmark` / `test:spec:gfm` scope to one suite. Pass/fail counts are locked by `test/spec/expected-failures.json`: any listed example that starts passing fails the suite (remove it from the list); any unlisted example that starts failing fails the suite. Compliance can only go up. Current counts and section breakdowns live in `test/spec/conformance.md`; update them when the expected-failure list changes.
@@ -26,7 +24,7 @@ Run from the marktext repo root.
 - `pnpm -C packages/muya lint:types` — `tsc --noEmit`.
 - `pnpm -C packages/muya lint:css` — Stylelint over `src/**/*.css`.
 - `pnpm -C packages/muya check-circular` — `madge --circular src/index.ts`. CI enforces this.
-- `pnpm -C packages/muya/e2e e2e` — Playwright E2E (chromium/firefox/webkit). `e2e:install` is a one-time browser install. CI (`muya-e2e.yml`) runs Chromium only; Firefox + WebKit are configured in `playwright.config.ts` and runnable locally, but excluded from the CI matrix until the engine-independent rewrites in BACKLOG Phase 3 land (triple-click selection, search-replace mutation timing).
+- `pnpm -C packages/muya/e2e e2e` — Playwright E2E (chromium/firefox/webkit). `e2e:install` is a one-time browser install. CI (`muya-e2e.yml`) runs Chromium only; Firefox + WebKit are configured in `playwright.config.ts` and runnable locally, with engine-specific exclusions and coverage limits documented in `e2e/README.md`.
 
 The package declares Node ≥20.19; this workspace requires Node ≥22.12 and pnpm ≥10. Build target is `chrome70`.
 
@@ -42,7 +40,7 @@ The package declares Node ≥20.19; this workspace requires Node ≥22.12 and pn
 
 Holds the runtime modules: `JSONState`, `EditTransactions`, `InlineRenderer`, `Selection`, `Search`, `Clipboard`, `History`, and the root `ScrollPage`. It owns `activeContentBlock` (the focused leaf) and routes DOM events (`click`, `input`, `keydown`, `keyup`, `compositionstart/end`) merged via RxJS to the active block's handlers (`clickHandler`, `inputHandler`, etc.). Anything that listens to user input on a block ultimately flows through this dispatch.
 
-`Editor.updateContents(operations, selection, source)` submits `ot-json1` operations through `EditTransactions`. Block mutations can be batched until the next frame; explicit `muya.transact()` scopes complete synchronously. The coordinator applies editing rules, synchronizes the state and live tree, and publishes the completed change. Call `muya.flush()` before persisting or switching documents. See [`src/editor/transactions/README.md`](src/editor/transactions/README.md) for transaction, rollback and history boundaries.
+`Editor.updateContents(operations, selection, source)` submits `ot-json1` operations through `EditTransactions`. Block mutations can be batched until the next frame; explicit `muya.transact()` scopes complete synchronously. The coordinator applies editing rules, synchronizes the state and live tree, and publishes the completed change. Call `muya.flush()` before persisting or switching documents. Transaction, rollback and history boundaries are implemented in [`src/editor/transactions/index.ts`](src/editor/transactions/index.ts).
 
 ### Block tree
 
@@ -74,7 +72,7 @@ Each subfolder is a floating tool/menu (inline format toolbar, image tools, para
 
 ### Selection contract
 
-`muya.getSelection()` returns a runtime union discriminated by `kind` (text, image or table), or `null`. Use `getSelectionState()` for serializable snapshots and `setSelection()` to restore them. `selection-change` emits `{ selection, docChanged }`; old flat selection fields and the old public `setCursor()` variants have been removed. See [`src/selection/README.md`](src/selection/README.md).
+`muya.getSelection()` returns a runtime union discriminated by `kind` (text, image or table), or `null`. Use `getSelectionState()` for serializable snapshots and `setSelection()` to restore them. `selection-change` emits `{ selection, docChanged }`. Selection shapes and coordinate units are defined in [`src/selection/types.ts`](src/selection/types.ts).
 
 ### Public API surface
 
@@ -114,7 +112,7 @@ the dedicated `muya.setFocusMode(boolean)` API.
 - **Madge** circular-dep check (`pnpm -C packages/muya check-circular`) runs in CI — adding a circular import will fail the build.
 - Test files (`*.test.ts`, `*.spec.ts`) and `vite.config.ts` are excluded from the strict TS lint rules above.
 
-Upstream muya had Conventional Commits + husky + lint-staged + release-it wired up. Those are **not** migrated into marktext — marktext uses its root Husky pre-commit hook with lint-staged but has no commitlint configuration, and `@muyajs/core` is not published from this repo. Commit style follows marktext's root contributing guide.
+MarkText uses its root Husky pre-commit hook with lint-staged and has no commitlint configuration. `@muyajs/core` is not published from this repo. Commit style follows MarkText's root contributing guide.
 
 ## Build pipeline notes
 

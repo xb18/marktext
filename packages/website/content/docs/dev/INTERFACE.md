@@ -30,4 +30,4 @@ The desktop main process handles command shortcuts. Muya menus display the activ
 
 Set `keyboardShortcuts: false` on `InlineFormatToolbar` and `ParagraphQuickInsertMenu`, and provide `getShortcut(action)` to both and `ParagraphFrontMenu`. Empty results hide the hint. Call `muya.refreshShortcutHints()` when bindings change. Clicks and slash-menu navigation remain enabled; standalone consumers can omit these options to retain defaults.
 
-Recording, conflict checks and dispatch share `common/localShortcut`. See its README for layout handling and retain its MIT notice when packaging.
+Recording, conflict checks and dispatch share the layout-aware `KeyboardMapper` in `common/localShortcut`. Retain the upstream MIT notices in `packages/desktop/src/common/localShortcut/LICENSE` when packaging.

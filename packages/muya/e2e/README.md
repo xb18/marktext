@@ -36,7 +36,7 @@ pnpm --filter muya-e2e e2e:ui    # Playwright UI mode (recommended for debugging
 pnpm --filter muya-e2e e2e:headed # full matrix with visible browser windows
 ```
 
-Targeted runs (Phase 2 added the cross-browser matrix):
+Targeted runs:
 
 ```sh
 pnpm --filter muya-e2e e2e:chromium   # Chromium only (system Chrome locally)
@@ -85,6 +85,21 @@ pnpm --filter muya-e2e e2e:report   # Open the generated HTML report
 3. Use selectors from `tests/helpers/selectors.ts` (or extend it). Don't hard-code `.mu-*` classes inside spec files.
 4. Bias toward asserting via the public API (`getMarkdown` / `getState` / `getTOC`) over DOM regex matching — markdown serialization is deterministic where snabbdom output can shift.
 
-## Roadmap
+## Coverage limits
 
-The initial four phases have landed. [BACKLOG.md](./BACKLOG.md) records their historical snapshots and remaining cross-browser, accessibility and performance work; its counts are not the current suite inventory. List the current tests with `pnpm --filter muya-e2e exec playwright test --list`.
+- Firefox and WebKit exclude the inline toolbar, keyboard shortcut and
+  search/replace suites listed in `playwright.config.ts`. Their selection and
+  search drivers need browser-independent coverage before those exclusions can
+  be removed and CI expanded beyond Chromium.
+- Native clipboard tests require Chromium permissions and are skipped on
+  Firefox/WebKit. Synthetic IME tests also have WebKit exclusions; see the skip
+  reasons beside each test.
+- Accessibility scans fail on `critical` violations and log lower-severity
+  findings. The host toolbar (`.tools`) is excluded from scans.
+- The performance smoke test uses the Vite development server and allows up to
+  60 seconds for 10,000-paragraph `setContent`. This is a regression threshold;
+  production performance needs separate measurement.
+- This workspace has no dedicated E2E type-check script.
+
+List the current tests with
+`pnpm --filter muya-e2e exec playwright test --list`.

@@ -109,9 +109,8 @@ root holds only shared tooling and CI-facing scripts.
                             (listed in pnpm-workspace.yaml).
       e2e/                  muya-e2e — Playwright suite. CI runs Chromium
                             only via muya-e2e.yml; Firefox + WebKit are
-                            wired in playwright.config.ts but deferred
-                            until BACKLOG Phase 3 lands engine-independent
-                            specs.
+                            available locally with exclusions documented
+                            in e2e/README.md and playwright.config.ts.
     website/                marktext-website (Next.js 15 + React 19).
                             Own lint/typecheck scripts and website-deploy CI;
                             OpenNext + Cloudflare Workers hosting.
