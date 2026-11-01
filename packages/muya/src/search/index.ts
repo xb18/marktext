@@ -186,10 +186,15 @@ export class Search {
     replace(replaceValue: string, opt: IReplaceOption = { isSingle: true, isRegexp: false }) {
         if (!this._muya.canMutate)
             return this;
-        const { isSingle, isRegexp, ...rest } = opt;
+        const { isSingle, isRegexp, fromSelection, ...rest } = opt;
         const options = Object.assign({}, this._options, rest, { isRegexp });
         const { matches, index } = this;
         const value = this._query;
+
+        if (isSingle && fromSelection && matches.length) {
+            this._replaceFromSelection(replaceValue, options);
+            return this;
+        }
 
         if (matches.length) {
             this._innerReplace(
@@ -205,6 +210,41 @@ export class Search {
         }
 
         return this;
+    }
+
+    private _replaceFromSelection(replaceValue: string, options: ISearchOption): void {
+        const selection = this._muya.editor.selection.getTextSelection();
+        let index = this.index;
+        let selectedMatch = false;
+        if (selection) {
+            const forward = this._comparePosition(selection.anchor, selection.focus) <= 0;
+            const start = forward ? selection.anchor : selection.focus;
+            const end = forward ? selection.focus : selection.anchor;
+            index = this._findMatchIndex(start, 'next');
+            const match = this.matches[index];
+            const path = contentPath(match.block);
+            selectedMatch = this._comparePosition(start, { path, offset: match.start }) === 0
+                && this._comparePosition(end, { path, offset: match.end }) === 0;
+        }
+        if (!selectedMatch) {
+            this.search(this._query, { ...options, highlightIndex: index, selectHighlight: true });
+            return;
+        }
+        const match = this.matches[index];
+        const replacement = options.isRegexp ? buildRegexValue(match, replaceValue) : replaceValue;
+        const focused = document.activeElement;
+        this._updating = true;
+        try {
+            this._innerReplace([match], () => replacement);
+            const offset = match.start + replacement.length;
+            match.block.setCursor(offset, offset);
+            this._restoreExternalFocus(focused);
+            this.search(this._query, { ...options, selectHighlight: false });
+            this.find('next');
+        }
+        finally {
+            this._updating = false;
+        }
     }
 
     find(action: 'previous' | 'next'): this {

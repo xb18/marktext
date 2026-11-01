@@ -28,7 +28,7 @@
             v-model="searchValue"
             type="text"
             :placeholder="t('search.searchPlaceholder')"
-            @keydown="handleEnterKey"
+            @keydown="handleSearchKey"
           >
           <div class="controls">
             <span class="search-result">{{ highlightIndex + 1 }} /
@@ -84,6 +84,7 @@
               type="button"
               class="button right"
               :aria-label="t('menu.edit.findPrevious')"
+              :disabled="!canNavigate"
               @click="find('previous')"
             >
               <el-icon :size="14">
@@ -96,6 +97,7 @@
               type="button"
               class="button"
               :aria-label="t('menu.edit.findNext')"
+              :disabled="!canNavigate"
               @click="find('next')"
             >
               <el-icon :size="14">
@@ -111,9 +113,11 @@
       >
         <div class="input-wrapper replace-input input-focus-border">
           <input
+            ref="replacement"
             v-model="replaceValue"
             type="text"
             :placeholder="t('search.replacementPlaceholder')"
+            @keydown="handleReplaceKey"
           >
         </div>
         <div class="button-group">
@@ -122,6 +126,7 @@
               type="button"
               class="button right"
               :aria-label="t('search.replaceAll')"
+              :disabled="!canNavigate"
               @click="replace(false)"
             >
               <el-icon :size="14">
@@ -134,6 +139,7 @@
               type="button"
               class="button"
               :aria-label="t('search.replaceSingle')"
+              :disabled="!canNavigate"
               @click="replace(true)"
             >
               <el-icon :size="14">
@@ -170,6 +176,7 @@ import { useEditorStore } from '@/store/editor'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import debounce from 'lodash/debounce'
+import escapeRegExp from 'lodash/escapeRegExp'
 import { ArrowDown, ArrowUp, Close, RefreshRight, Switch } from '@element-plus/icons-vue'
 import IconTooltip from '@/components/iconTooltip/index.vue'
 
@@ -186,6 +193,7 @@ const searchValue = ref('')
 const replaceValue = ref('')
 const searchErrorMsg = ref('')
 const search = ref<HTMLInputElement | null>(null)
+const replacement = ref<HTMLInputElement | null>(null)
 let prefilling = false
 
 const { currentFile } = storeToRefs(editorStore)
@@ -202,18 +210,14 @@ watch(searchValue, () => {
   debouncedSearchFn()
 }, { flush: 'sync' })
 
-const prefillFromSelection = () => {
+const prefillFromSelection = (includeWord = true, fromNavigation = false) => {
+  if (!fromNavigation && document.activeElement?.closest('.search-bar')) return
   const state = searchMatches.value
-  const selected = state?.selectedText
-  const activeMatch = state?.matches[state.index]
-  const selectedResult = state?.value === searchValue.value && activeMatch !== null &&
-    typeof activeMatch === 'object' && 'match' in activeMatch && activeMatch.match === selected
-  // Search-selected text must not replace the retained expression with a literal match.
-  if (selected && !selectedResult && !document.activeElement?.closest('.search-bar')) {
-    prefilling = true
-    searchValue.value = selected
-    prefilling = false
-  }
+  const selected = state?.selectedText || (includeWord ? state?.wordAtCursor : '')
+  if (!selected || selected.includes('\n')) return
+  prefilling = true
+  searchValue.value = isRegexp.value ? escapeRegExp(selected) : selected
+  prefilling = false
 }
 
 const refreshSearch = () => {
@@ -232,6 +236,7 @@ const highlightIndex = computed(() => {
 const highlightCount = computed(() => {
   return searchMatches.value ? searchMatches.value.matches.length : 0
 })
+const canNavigate = computed(() => !searchErrorMsg.value && highlightCount.value > 0)
 
 onMounted(() => {
   bus.on('find', listenFind)
@@ -257,6 +262,7 @@ onBeforeUnmount(() => {
 })
 
 const toggleCtrl = (ctrl: 'isCaseSensitive' | 'isWholeWord' | 'isRegexp') => {
+  debouncedSearchFn.cancel()
   switch (ctrl) {
     case 'isCaseSensitive':
       isCaseSensitive.value = !isCaseSensitive.value
@@ -273,10 +279,11 @@ const toggleCtrl = (ctrl: 'isCaseSensitive' | 'isWholeWord' | 'isRegexp') => {
 
 const listenFind = () => {
   if (currentFile.value?.readOnly) return
+  debouncedSearchFn.flush()
   debouncedSearchFn.cancel()
   prefillFromSelection()
+  if (!showSearch.value) type.value = 'search'
   showSearch.value = true
-  type.value = 'search'
   bus.emit('search-visibility', true)
   searchFn(false)
   nextTick(() => {
@@ -289,25 +296,37 @@ const listenFind = () => {
 
 const listenReplace = () => {
   if (currentFile.value?.readOnly) return
+  debouncedSearchFn.flush()
   debouncedSearchFn.cancel()
-  prefillFromSelection()
+  const selected = searchMatches.value?.selectedText
+  const hasSingleLineSelection = !!selected && !selected.includes('\n')
+  const focusReplacement = document.activeElement === search.value || hasSingleLineSelection
+  prefillFromSelection(false)
   showSearch.value = true
   type.value = 'replace'
   bus.emit('search-visibility', true)
   searchFn(false)
   nextTick(() => {
-    search.value?.focus()
-    search.value?.select()
+    const input = focusReplacement ? replacement.value : search.value
+    input?.focus()
+    input?.select()
   })
 }
 
-const listenFindNext = () => {
-  if (!currentFile.value?.readOnly) find('next')
+const navigate = (action: 'previous' | 'next') => {
+  if (currentFile.value?.readOnly) return
+  if (!showSearch.value) {
+    if (!searchValue.value) prefillFromSelection()
+    type.value = 'search'
+    showSearch.value = true
+    bus.emit('search-visibility', true)
+    searchFn(false)
+  }
+  find(action)
 }
 
-const listenFindPrev = () => {
-  if (!currentFile.value?.readOnly) find('previous')
-}
+const listenFindNext = () => navigate('next')
+const listenFindPrev = () => navigate('previous')
 
 const docKeyup = (event: KeyboardEvent) => {
   if (event.key === 'Escape' && !event.isComposing && showSearch.value) {
@@ -319,6 +338,7 @@ const blurSearch = () => hideSearch()
 
 const hideSearch = () => {
   if (!showSearch.value) return
+  debouncedSearchFn.flush()
   debouncedSearchFn.cancel()
   searchFn(false)
   showSearch.value = false
@@ -327,24 +347,62 @@ const hideSearch = () => {
 
 const toggleSearchType = () => {
   if (currentFile.value?.readOnly) return
+  debouncedSearchFn.flush()
   type.value = type.value === 'search' ? 'replace' : 'search'
 }
 
 const find = (action: 'previous' | 'next') => {
   debouncedSearchFn.flush()
+  if (!searchValue.value) {
+    prefillFromSelection(true, true)
+    searchFn(false)
+  }
   if (searchErrorMsg.value) return
   bus.emit('find-action', action)
 }
 
-const handleEnterKey = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+const focusEditorFromInput = (event: KeyboardEvent) => {
+  if (event.key === 'ArrowDown' && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault()
+    bus.emit('search-focus-editor')
+  }
+}
+
+const handleSearchKey = (event: KeyboardEvent) => {
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    replace(false)
+  } else if (event.key === 'Tab' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && type.value === 'replace') {
+    event.preventDefault()
+    replacement.value?.focus()
+  } else if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault()
     find(event.shiftKey ? 'previous' : 'next')
+  } else {
+    focusEditorFromInput(event)
+  }
+}
+
+const handleReplaceKey = (event: KeyboardEvent) => {
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    replace(false)
+  } else if (event.key === 'Tab' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault()
+    search.value?.focus()
+  } else if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey) {
+    event.preventDefault()
+    replace(!event.metaKey)
+  } else {
+    focusEditorFromInput(event)
   }
 }
 
 const searchFn = (selectHighlight = true) => {
   searchErrorMsg.value = ''
+  const clearResults = () => bus.emit('searchValue', { value: '', opt: { selectHighlight: false } })
   if (isRegexp.value) {
     // Handle invalid regexp.
     try {
@@ -352,6 +410,7 @@ const searchFn = (selectHighlight = true) => {
       searchErrorMsg.value = ''
     } catch {
       searchErrorMsg.value = t('search.invalidRegex', { pattern: searchValue.value })
+      clearResults()
       return
     }
     // Handle match empty string, no need to search.
@@ -363,6 +422,7 @@ const searchFn = (selectHighlight = true) => {
       searchErrorMsg.value = ''
     } catch {
       searchErrorMsg.value = t('search.regexMatchEmpty', { pattern: searchValue.value })
+      clearResults()
       return
     }
   }
@@ -381,6 +441,8 @@ const searchFn = (selectHighlight = true) => {
 const debouncedSearchFn = debounce(() => searchFn(), 150)
 
 const replace = (isSingle = true) => {
+  debouncedSearchFn.flush()
+  if (!canNavigate.value) return
   bus.emit('replaceValue', {
     value: replaceValue.value,
     opt: {
@@ -406,6 +468,11 @@ const replace = (isSingle = true) => {
   display: flex;
   flex-direction: row;
 }
+.search-bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .search-bar .left-arrow {
   width: 20px;
   flex-shrink: 0;

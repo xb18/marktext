@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import ts from 'typescript'
 import { ref, computed, watch, nextTick } from 'vue'
+import escapeRegExp from 'lodash/escapeRegExp'
 
 // Moving focus to Find previously let a native selection event overwrite the
 // prefilled query. Exercise the component's setup with real Vue reactivity.
@@ -18,7 +19,7 @@ interface Bindings {
   listenFind: () => void
   listenReplace: () => void
   hideSearch: () => void
-  handleEnterKey: (event: KeyboardEvent) => void
+  handleSearchKey: (event: KeyboardEvent) => void
   replaceValue: { value: string }
   searchFn: (selectHighlight?: boolean) => void
 }
@@ -40,7 +41,7 @@ const loadComponent = (deps: Record<string, unknown>) => {
     'module',
     `const { _defineComponent, ref, computed, watch, onMounted, onBeforeUnmount,
       nextTick, bus, FindCaseIcon, FindWordIcon, FindRegexIcon, useEditorStore,
-      storeToRefs, useI18n, debounce, ArrowDown, ArrowUp, Close, RefreshRight, Switch, IconTooltip } = __deps
+      storeToRefs, useI18n, debounce, escapeRegExp, ArrowDown, ArrowUp, Close, RefreshRight, Switch, IconTooltip } = __deps
     ${js}
     return module.exports`
   ) as (deps: Record<string, unknown>, exports: object, module: object) => {
@@ -59,6 +60,7 @@ const makeBindings = () => {
   const deps = {
     _defineComponent: (o: unknown) => o,
     ref,
+    escapeRegExp,
     computed,
     watch,
     nextTick,
@@ -116,7 +118,7 @@ describe('find-bar prefill from selection', () => {
 
 
 describe('find-bar session', () => {
-  it('retains an expression when opening Replace or reopening on its selected result', () => {
+  it('seeds explicit Find from the selected match like VS Code', () => {
     const { ret, currentFile } = makeBindings()
     ret.searchValue.value = 'cat([0-9]+)'
     currentFile.value = {
@@ -125,11 +127,8 @@ describe('find-bar session', () => {
         matches: [{ match: 'cat1' }], selectedText: 'cat1'
       }
     }
-    ret.listenReplace()
-    expect(ret.searchValue.value).toBe('cat([0-9]+)')
-    ret.hideSearch()
     ret.listenFind()
-    expect(ret.searchValue.value).toBe('cat([0-9]+)')
+    expect(ret.searchValue.value).toBe('cat1')
   })
 
   it('prefills an open bar without scheduling a cursor-moving search', async() => {
@@ -181,12 +180,12 @@ describe('find-bar session', () => {
 
   it('uses Shift+Enter for the previous result and ignores IME confirmation', () => {
     const { ret, bus } = makeBindings()
-    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
+    ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
     expect(bus.emit).toHaveBeenLastCalledWith('find-action', 'previous')
-    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter' }))
+    ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter' }))
     expect(bus.emit).toHaveBeenLastCalledWith('find-action', 'next')
     bus.emit.mockClear()
-    ret.handleEnterKey(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
+    ret.handleSearchKey(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
     expect(bus.emit).not.toHaveBeenCalled()
   })
 })

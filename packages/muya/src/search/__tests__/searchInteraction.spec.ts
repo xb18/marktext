@@ -120,6 +120,19 @@ describe('find interaction', () => {
         input.remove();
     });
 
+    it('keeps the logical match when moving between external inputs collapses the DOM range', () => {
+        muya.search('apple', { selectHighlight: true });
+        const selected = muya.getSelectionState();
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        input.focus();
+        document.getSelection()?.collapse(blocks()[0].domNode, 0);
+        expect(muya.getSelectionState()).toEqual(selected);
+        muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(blocks()[0].text).toBe('pear apricot apple');
+        input.remove();
+    });
+
     it('keeps external focus while refreshing retained highlights', () => {
         blocks()[0].setCursor(0, 0);
         const input = document.createElement('input');
@@ -130,6 +143,39 @@ describe('find interaction', () => {
         muya.editor.searchModule.refresh();
         expect(document.activeElement).toBe(input);
         input.remove();
+    });
+
+    it('a selection-aware replacement first selects a result from the moved caret', () => {
+        muya.search('apple', { selectHighlight: true });
+        blocks()[1].setCursor(0, 0);
+        muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(blocks()[1].text).toBe('banana apple');
+        expect(activeMatch().text).toBe('banana apple');
+        muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(blocks()[1].text).toBe('banana pear');
+        expect(activeMatch().text).toBe('last apple');
+    });
+
+    it('a selection-aware replacement uses a manually selected match and wraps after the last', () => {
+        muya.search('apple', { selectHighlight: true });
+        blocks()[2].setCursor(5, 10);
+        muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(blocks()[2].text).toBe('last pear');
+        expect(activeMatch()).toEqual({ text: 'apple apricot apple', start: 0, end: 5 });
+    });
+
+    it('continues after the inserted replacement instead of finding its own new matches', () => {
+        muya.search('apple', { selectHighlight: true });
+        muya.replace('apple apple', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(activeMatch()).toEqual({ text: 'apple apple apricot apple', start: 20, end: 25 });
+    });
+
+    it('leaves a collapsed caret after replacing the only match', () => {
+        muya.setContent('apple');
+        muya.search('apple', { selectHighlight: true });
+        muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
+        expect(muya.editor.searchModule.matches).toHaveLength(0);
+        expect(muya.getSelectionState()).toMatchObject({ anchor: { offset: 4 }, focus: { offset: 4 } });
     });
 
     it('refreshes matches after editing without moving the caret', async () => {

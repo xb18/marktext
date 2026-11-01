@@ -1032,7 +1032,7 @@ const toSearchMatches = (result: unknown) => {
 
 let updatingSearchSelection = false
 
-const updateSearchSelection = (operation: () => ReturnType<Muya['search']>): void => {
+const updateSearchSelection = (operation: () => unknown): void => {
   updatingSearchSelection = true
   try {
     editorStore.SEARCH(toSearchMatches(operation()))
@@ -1058,17 +1058,27 @@ const handleSearchVisibility = (visible: unknown) => {
   }
 }
 
+const focusSearchEditor = () => {
+  const muya = editor.value
+  if (!muya) return
+  const selection = muya.getSelectionState()
+  muya.domNode.focus({ preventScroll: true })
+  if (selection) muya.setSelection(selection)
+}
+
 const handReplace = (payload: unknown) => {
   if (!editor.value) return
+  const muya = editor.value
   const { value, opt } = payload as { value: string; opt?: IReplaceOption }
-  editorStore.SEARCH(toSearchMatches(editor.value.replace(value, opt)))
+  updateSearchSelection(() => muya.replace(value, { ...opt, fromSelection: true }))
+  nextTick(scrollToSearchResult)
 }
 
 const handleFindAction = (action: unknown) => {
   if (!editor.value) return
   const muya = editor.value
   updateSearchSelection(() => muya.find(action as 'previous' | 'next'))
-  if (muya.editor.searchModule.matches.length) scrollToSearchResult()
+  if (muya.editor.searchModule.matches.length) nextTick(scrollToSearchResult)
 }
 
 const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
@@ -1860,6 +1870,7 @@ onMounted(() => {
   bus.on('format', handleInlineFormat)
   bus.on('searchValue', handleSearch)
   bus.on('search-visibility', handleSearchVisibility)
+  bus.on('search-focus-editor', focusSearchEditor)
   bus.on('replaceValue', handReplace)
   bus.on('find-action', handleFindAction)
   bus.on('insert-image', insertImage)
@@ -2031,6 +2042,7 @@ onBeforeUnmount(() => {
   bus.off('format', handleInlineFormat)
   bus.off('searchValue', handleSearch)
   bus.off('search-visibility', handleSearchVisibility)
+  bus.off('search-focus-editor', focusSearchEditor)
   bus.off('replaceValue', handReplace)
   bus.off('find-action', handleFindAction)
   bus.off('insert-image', insertImage)

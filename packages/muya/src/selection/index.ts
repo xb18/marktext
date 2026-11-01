@@ -107,6 +107,11 @@ class Selection {
     }
 
     private _readNative(): IResolvedTextSelection | null {
+        const focused = this._muya.domNode.ownerDocument.activeElement;
+        const inputFocused = focused?.tagName === 'INPUT' || focused?.tagName === 'TEXTAREA';
+        // Switching external inputs can collapse the DOM range without moving the editor selection.
+        if (!this._muya.isReadOnly && inputFocused && !this._muya.domNode.contains(focused))
+            return null;
         const live = this._text.getSelection();
         if (!live)
             return null;
