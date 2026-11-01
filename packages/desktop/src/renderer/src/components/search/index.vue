@@ -144,6 +144,19 @@
         </div>
       </section>
     </div>
+    <icon-tooltip :content="`${t('dialog.close')} (Escape)`">
+      <button
+        type="button"
+        class="plain-button close-search"
+        :aria-label="t('dialog.close')"
+        aria-keyshortcuts="Escape"
+        @click="hideSearch"
+      >
+        <el-icon :size="14">
+          <Close />
+        </el-icon>
+      </button>
+    </icon-tooltip>
   </div>
 </template>
 
@@ -157,7 +170,7 @@ import { useEditorStore } from '@/store/editor'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import debounce from 'lodash/debounce'
-import { ArrowDown, ArrowUp, RefreshRight, Switch } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Close, RefreshRight, Switch } from '@element-plus/icons-vue'
 import IconTooltip from '@/components/iconTooltip/index.vue'
 
 const { t } = useI18n()
@@ -378,7 +391,7 @@ const replace = (isSingle = true) => {
 <style scoped>
 .search-bar {
   position: absolute;
-  width: 400px;
+  width: 432px;
   padding: 0;
   top: 0;
   right: 20px;
@@ -408,6 +421,19 @@ const replace = (isSingle = true) => {
 
 .search-bar .right-controls {
   flex: 1;
+}
+.search-bar .close-search {
+  flex: 0 0 24px;
+  height: 28px;
+  margin: 4px 4px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--sideBarIconColor);
+}
+.search-bar .close-search:hover {
+  background: var(--floatHoverColor);
 }
 .search,
 .replace {

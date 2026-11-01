@@ -120,6 +120,32 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator('.search-bar .search-result')).toContainText('3 / 6')
   })
 
+  test('close button preserves the session and returns focus to the editor', async() => {
+    await placeSelection(page, 1, 0)
+    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'replace')
+    await page.locator(inputSelector).fill('apple')
+    await page.locator('.search-bar .replace input').fill('pear')
+    await page.locator('.search-bar .is-case-sensitive').click()
+    await expect(page.locator('.search-bar .search-result')).toContainText('3 / 6')
+
+    const close = page.locator('.search-bar .close-search')
+    await expect(close).toHaveAttribute('aria-keyshortcuts', 'Escape')
+    await expect(close).toHaveAccessibleName(/Close|关闭/)
+    await close.click()
+    await expect(page.locator('.search-bar')).toBeHidden()
+    await expect(page.locator('.mu-editor')).toBeFocused()
+    await expect(page.locator('.mu-highlight, .mu-selection')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe('apple')
+
+    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findNext')
+    await openFind(app, page)
+    await expect(page.locator(inputSelector)).toHaveValue('apple')
+    await expect(page.locator('.search-bar .search-result')).toContainText('4 / 6')
+    await expect(page.locator('.search-bar .is-case-sensitive')).toHaveAttribute('aria-pressed', 'true')
+    await sendIpcToRenderer(app, 'mt::editor-edit-action', 'replace')
+    await expect(page.locator('.search-bar .replace input')).toHaveValue('pear')
+  })
+
   test('reveals the next result after closing Find without moving on reopen', async() => {
     const longDocument = ['first apple', ...Array.from({ length: 60 }, (_, i) => `paragraph ${i}`), 'last apple'].join('\n\n')
     await setSourceMarkdown(page, app, longDocument)
