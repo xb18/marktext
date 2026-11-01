@@ -371,8 +371,11 @@ export class Editor {
                 return;
             if (!this._isContentEvent(event))
                 return;
-            if (this._handlePreviewClick(event))
+            const previewTarget = this._getPreviewClickTarget(event);
+            if (previewTarget) {
+                this._handlePreviewClick(previewTarget, event);
                 return;
+            }
             const selectionResult = this.selection.getTextSelection();
             const anchorBlock = selectionResult?.anchor.block;
             const isSelectionInSameBlock = selectionResult?.isSelectionInSameBlock;
@@ -406,30 +409,7 @@ export class Editor {
             }
 
             this.activeContentBlock = anchorBlock;
-
-            switch (event.type) {
-                case 'click': {
-                    anchorBlock.clickHandler(event);
-                    break;
-                }
-                case 'input': {
-                    anchorBlock.inputHandler(event);
-                    break;
-                }
-                case 'keydown': {
-                    anchorBlock.keydownHandler(event);
-                    break;
-                }
-                case 'keyup': {
-                    anchorBlock.keyupHandler(event);
-                    break;
-                }
-                case 'compositionend':
-                case 'compositionstart': {
-                    anchorBlock.composeHandler(event);
-                    break;
-                }
-            }
+            this._dispatchContentEvent(anchorBlock, event);
         };
 
         merge(
@@ -467,17 +447,41 @@ export class Editor {
             || (event.target instanceof Node && !!findContentDOM(event.target));
     }
 
-    private _handlePreviewClick(event: Event): boolean {
+    private _dispatchContentEvent(block: Content, event: Event): void {
+        switch (event.type) {
+            case 'click':
+                block.clickHandler(event);
+                break;
+            case 'input':
+                block.inputHandler(event);
+                break;
+            case 'keydown':
+                block.keydownHandler(event);
+                break;
+            case 'keyup':
+                block.keyupHandler(event);
+                break;
+            case 'compositionend':
+            case 'compositionstart':
+                block.composeHandler(event);
+                break;
+        }
+    }
+
+    private _getPreviewClickTarget(event: Event): Element | null {
         if (event.type !== 'click' || !(event.target instanceof Element)
             || !event.target.closest(`.${CLASS_NAMES.MU_MATH_RENDER}, .${CLASS_NAMES.MU_RUBY_RENDER}`)) {
-            return false;
+            return null;
         }
-        const block = getBlock(findContentDOM(event.target));
+        return event.target;
+    }
+
+    private _handlePreviewClick(target: Element, event: Event): void {
+        const block = getBlock(findContentDOM(target));
         if (block?.isContent()) {
             this.activeContentBlock = block;
             block.clickHandler(event);
         }
-        return true;
     }
 
     focus() {
