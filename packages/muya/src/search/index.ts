@@ -2,18 +2,15 @@ import type Content from '../block/base/content';
 import type TreeNode from '../block/base/treeNode';
 import type { IHighlight } from '../inlineRenderer/types';
 import type { Muya } from '../muya';
-import type { ISelectionEndpoint, TSelectionState } from '../selection/types';
+import type { IAnchorFocusInfo, ISelectionEndpoint, TSelectionState } from '../selection/types';
 import type { IMatch, IReplaceOption, ISearchOption } from './types';
 import { unfoldAllSections } from '../block/folding';
 import { DEFAULT_SEARCH_OPTIONS } from '../config';
-import { contentPath, resolveContent } from '../selection/state';
-import { SelectionType } from '../selection/types';
+import { comparePaths, contentPath, resolveContent, resolveEndpoint } from '../selection/state';
+import { SelectionDirection, SelectionType } from '../selection/types';
 import { buildRegexValue, matchString } from '../utils/search';
 
-interface ISearchPosition {
-    block: Content;
-    offset: number;
-}
+type SearchPosition = Pick<IAnchorFocusInfo, 'block' | 'offset'>;
 
 export class Search {
     private _query: string = '';
@@ -54,7 +51,7 @@ export class Search {
         });
     }
 
-    private _comparePosition(a: ISearchPosition, b: ISearchPosition): number {
+    private _comparePosition(a: SearchPosition, b: SearchPosition): number {
         if (a.block === b.block)
             return a.offset - b.offset;
         const first = a.block.domNode;
@@ -66,16 +63,12 @@ export class Search {
             if (order & Node.DOCUMENT_POSITION_PRECEDING)
                 return 1;
         }
-        const aPath = contentPath(a.block);
-        const bPath = contentPath(b.block);
-        for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
-            if (aPath[i] !== bPath[i]) {
-                return typeof aPath[i] === 'number' && typeof bPath[i] === 'number'
-                    ? Number(aPath[i]) - Number(bPath[i])
-                    : String(aPath[i]).localeCompare(String(bPath[i]));
-            }
-        }
-        return aPath.length - bPath.length || a.offset - b.offset;
+        return comparePaths(contentPath(a.block), contentPath(b.block)) || a.offset - b.offset;
+    }
+
+    private _isSelectedMatch(match: IMatch | undefined, start: SearchPosition, end: SearchPosition): boolean {
+        return !!match && start.block === match.block && end.block === match.block
+            && start.offset === match.start && end.offset === match.end;
     }
 
     private _restoreExternalFocus(focused: Element | null): void {
@@ -91,7 +84,7 @@ export class Search {
         this._restoreExternalFocus(focused);
     }
 
-    private _findMatchIndex(position: ISearchPosition, action: 'next' | 'previous', skipEmpty = false): number {
+    private _findMatchIndex(position: SearchPosition, action: 'next' | 'previous', skipEmpty = false): number {
         for (let i = action === 'next' ? 0 : this.matches.length - 1; i >= 0 && i < this.matches.length; i += action === 'next' ? 1 : -1) {
             const match = this.matches[i];
             const offset = action === 'next' ? match.start : match.end;
@@ -154,9 +147,8 @@ export class Search {
             const highlight: IHighlight = { start, end, active };
             const highlights = matchesMap.get(block);
 
-            if (matchesMap.has(block) && Array.isArray(highlights)) {
+            if (highlights) {
                 highlights.push(highlight);
-                matchesMap.set(block, highlights);
             }
             else {
                 matchesMap.set(block, [highlight]);
@@ -262,13 +254,12 @@ export class Search {
         let index = this.index;
         let selectedMatch = false;
         if (selection) {
-            const forward = this._comparePosition(selection.anchor, selection.focus) <= 0;
+            const forward = selection.direction !== SelectionDirection.BACKWARD;
             const start = forward ? selection.anchor : selection.focus;
             const end = forward ? selection.focus : selection.anchor;
             index = this._findMatchIndex(start, 'next');
             const match = this.matches[index];
-            selectedMatch = start.block === match.block && end.block === match.block
-                && start.offset === match.start && end.offset === match.end;
+            selectedMatch = this._isSelectedMatch(match, start, end);
         }
         if (!selectedMatch) {
             this.search(this._query, { ...options, highlightIndex: index, selectHighlight: true });
@@ -305,15 +296,14 @@ export class Search {
         const selection = this._muya.editor.selection.getTextSelection();
         if (selection) {
             const { anchor, focus } = selection;
-            const forward = this._comparePosition(anchor, focus) <= 0;
+            const forward = selection.direction !== SelectionDirection.BACKWARD;
             const start = forward ? anchor : focus;
             const end = forward ? focus : anchor;
             const active = matches[index];
             const position = action === 'next'
                 ? end
                 : start;
-            if (active && start.block === active.block && end.block === active.block
-                && start.offset === active.start && end.offset === active.end) {
+            if (this._isSelectedMatch(active, start, end)) {
                 index += action === 'next' ? 1 : -1;
             }
             else {
@@ -424,10 +414,9 @@ export class Search {
         if (!matches.length)
             return -1;
         if (selection?.kind === SelectionType.TEXT) {
-            const anchor = resolveContent(this._muya, selection.anchor.path);
-            const focus = resolveContent(this._muya, selection.focus.path);
-            const selectedIndex = matches.findIndex(match => match.block === anchor && match.block === focus
-                && match.start === selection.anchor.offset && match.end === selection.focus.offset);
+            const anchor = resolveEndpoint(this._muya, selection.anchor);
+            const focus = resolveEndpoint(this._muya, selection.focus);
+            const selectedIndex = anchor && focus ? matches.findIndex(match => this._isSelectedMatch(match, anchor, focus)) : -1;
             if (selectedIndex >= 0)
                 return selectedIndex;
         }

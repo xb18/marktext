@@ -188,7 +188,7 @@ const showSearch = ref(false)
 const isCaseSensitive = ref(false)
 const isWholeWord = ref(false)
 const isRegexp = ref(false)
-const type = ref('search')
+const type = ref<'search' | 'replace'>('search')
 const searchValue = ref('')
 const replaceValue = ref('')
 const searchErrorMsg = ref('')
@@ -204,6 +204,10 @@ watch(
   }
 )
 const searchMatches = computed(() => currentFile.value?.searchMatches)
+const singleLineSelection = computed(() => {
+  const selected = searchMatches.value?.selectedText
+  return selected && !selected.includes('\n') ? selected : ''
+})
 
 watch(searchValue, () => {
   if (!showSearch.value || prefilling) return
@@ -212,8 +216,8 @@ watch(searchValue, () => {
 
 const prefillFromSelection = () => {
   if (document.activeElement?.closest('.search-bar')) return
-  const selected = searchMatches.value?.selectedText
-  if (!selected || selected.includes('\n')) return
+  const selected = singleLineSelection.value
+  if (!selected) return
   prefilling = true
   searchValue.value = isRegexp.value ? escapeRegExp(selected) : selected
   prefilling = false
@@ -276,15 +280,19 @@ const toggleCtrl = (ctrl: 'isCaseSensitive' | 'isWholeWord' | 'isRegexp') => {
   searchFn()
 }
 
+const openSearch = (mode: 'search' | 'replace') => {
+  type.value = mode
+  showSearch.value = true
+  bus.emit('search-visibility', true)
+  searchFn(false)
+}
+
 const listenFind = () => {
   if (currentFile.value?.readOnly) return
   debouncedSearchFn.flush()
   debouncedSearchFn.cancel()
   prefillFromSelection()
-  if (!showSearch.value) type.value = 'search'
-  showSearch.value = true
-  bus.emit('search-visibility', true)
-  searchFn(false)
+  openSearch(showSearch.value ? type.value : 'search')
   nextTick(() => {
     search.value?.focus()
     // Select the existing term so re-opening Find types over it instead of
@@ -297,14 +305,9 @@ const listenReplace = () => {
   if (currentFile.value?.readOnly) return
   debouncedSearchFn.flush()
   debouncedSearchFn.cancel()
-  const selected = searchMatches.value?.selectedText
-  const hasSingleLineSelection = !!selected && !selected.includes('\n')
-  const focusReplacement = document.activeElement === search.value || hasSingleLineSelection
+  const focusReplacement = document.activeElement === search.value || !!singleLineSelection.value
   prefillFromSelection()
-  showSearch.value = true
-  type.value = 'replace'
-  bus.emit('search-visibility', true)
-  searchFn(false)
+  openSearch('replace')
   nextTick(() => {
     const input = focusReplacement ? replacement.value : search.value
     input?.focus()
@@ -315,10 +318,7 @@ const listenReplace = () => {
 const navigate = (action: 'previous' | 'next') => {
   if (currentFile.value?.readOnly) return
   if (!showSearch.value) {
-    type.value = 'search'
-    showSearch.value = true
-    bus.emit('search-visibility', true)
-    searchFn(false)
+    openSearch('search')
   }
   if (!searchValue.value) {
     nextTick(() => search.value?.focus())
@@ -398,40 +398,34 @@ const handleReplaceKey = (event: KeyboardEvent) => {
   }
 }
 
+const getSearchOptions = () => ({
+  isCaseSensitive: isCaseSensitive.value,
+  isWholeWord: isWholeWord.value,
+  isRegexp: isRegexp.value
+})
+
 const searchFn = (selectHighlight = true) => {
   searchErrorMsg.value = ''
-  const clearResults = () => bus.emit('searchValue', { value: '', opt: { selectHighlight: false } })
   if (isRegexp.value) {
-    // Handle invalid regexp.
     try {
-      RegExp(searchValue.value)
-      searchErrorMsg.value = ''
+      const pattern = new RegExp(searchValue.value)
+      if (searchValue.value && pattern.test('')) {
+        searchErrorMsg.value = t('search.regexMatchEmpty', { pattern: searchValue.value })
+      }
     } catch {
       searchErrorMsg.value = t('search.invalidRegex', { pattern: searchValue.value })
-      clearResults()
-      return
     }
-    // Handle match empty string, no need to search.
-    try {
-      const SEARCH_REG = new RegExp(searchValue.value)
-      if (searchValue.value && SEARCH_REG.test('')) {
-        throw new Error()
-      }
-      searchErrorMsg.value = ''
-    } catch {
-      searchErrorMsg.value = t('search.regexMatchEmpty', { pattern: searchValue.value })
-      clearResults()
-      return
-    }
+  }
+  if (searchErrorMsg.value) {
+    bus.emit('searchValue', { value: '', opt: { selectHighlight: false } })
+    return
   }
 
   bus.emit('searchValue', {
     value: searchValue.value,
     opt: {
       selectHighlight,
-      isCaseSensitive: isCaseSensitive.value,
-      isWholeWord: isWholeWord.value,
-      isRegexp: isRegexp.value
+      ...getSearchOptions()
     }
   })
 }
@@ -445,9 +439,7 @@ const replace = (isSingle = true) => {
     value: replaceValue.value,
     opt: {
       isSingle,
-      isCaseSensitive: isCaseSensitive.value,
-      isWholeWord: isWholeWord.value,
-      isRegexp: isRegexp.value
+      ...getSearchOptions()
     }
   })
 }
