@@ -86,6 +86,8 @@ export class InlineFormatToolbar extends BaseFloat {
 
     private _dragging = false;
 
+    private _searchSelectionKey: string | null = null;
+
     private _colorPanelCloseTimer: number | null = null;
 
     /**
@@ -115,6 +117,7 @@ export class InlineFormatToolbar extends BaseFloat {
                 this.hide();
         });
         eventCenter.attachDOMEvent(domNode, 'mousedown', () => {
+            this._searchSelectionKey = null;
             this._dragging = true;
             this.hide();
         });
@@ -159,11 +162,19 @@ export class InlineFormatToolbar extends BaseFloat {
 
     private _syncSelection(selection: TSelection | null) {
         if (selection?.kind !== SelectionType.TEXT) {
+            this._searchSelectionKey = null;
             this.hide();
             return;
         }
+        const selectionKey = JSON.stringify([selection.anchor, selection.focus]);
+        if (this.muya.editor.searchModule.isUpdatingSelection)
+            this._searchSelectionKey = selectionKey;
+        else if (this._searchSelectionKey !== selectionKey)
+            this._searchSelectionKey = null;
         const { anchorBlock, formats, isCollapsed, isSelectionInSameBlock, selectionCoords } = selection.context;
+        // A result selected by Find is navigation rather than a formatting gesture.
         if (this._dragging || this.muya.editor.isComposing || this.muya.isReadOnly || this._hasExternalFocus()
+            || this._searchSelectionKey !== null
             || isCollapsed || !isSelectionInSameBlock
             || !(anchorBlock instanceof Format) || !selectionCoords) {
             this.hide();

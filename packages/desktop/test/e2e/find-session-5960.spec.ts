@@ -84,10 +84,13 @@ test.describe('Find session (#5960)', () => {
     await page.locator('.mu-paragraph').nth(1).click()
     await expect(page.locator('.search-bar')).toBeVisible()
     await expect(page.locator(inputSelector)).toHaveValue('apple')
+    await placeSelection(page, 1, 0, 6)
+    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '1')
     await placeSelection(page, 1, 0)
     await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findNext')
     await expect.poll(() => activeParagraph(page)).toBe('middle apple apple')
     await expect(page.locator('.search-bar .search-result')).toContainText('3 / 6')
+    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
   })
 
   test('preserves both inputs and continues finding after Escape', async() => {
@@ -104,6 +107,7 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator('.search-bar')).toBeVisible()
     await expect(page.locator('.search-bar .replace')).toHaveCount(0)
     await expect(page.locator('.mu-editor')).toBeFocused()
+    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe('apple')
     await openFind(app, page)
     await expect(page.locator(inputSelector)).toHaveValue('apple')
@@ -216,11 +220,13 @@ test.describe('Find session (#5960)', () => {
     await expect(page.locator(inputSelector)).toHaveValue('apple')
     await expect(page.locator('.search-bar .search-result')).toContainText('2 / 6')
     await expect(page.locator('.mu-editor')).toBeFocused()
+    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
     await page.keyboard.press('Escape')
     await sendIpcToRenderer(app, 'mt::editor-edit-action', 'findPrev')
     await expect(page.locator('.search-bar')).toBeVisible()
     await expect(page.locator('.search-bar .search-result')).toContainText('1 / 6')
     await expect(page.locator('.mu-editor')).toBeFocused()
+    await expect(page.locator('.mu-format-picker-container')).toHaveCSS('opacity', '0')
   })
 
   test('navigation from an empty visible query restores the editor selection as its term', async() => {

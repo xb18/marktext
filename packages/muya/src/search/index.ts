@@ -24,6 +24,10 @@ export class Search {
         return this._query;
     }
 
+    get isUpdatingSelection(): boolean {
+        return this._updating;
+    }
+
     private get _scrollPage() {
         return this._muya.editor.scrollPage;
     }

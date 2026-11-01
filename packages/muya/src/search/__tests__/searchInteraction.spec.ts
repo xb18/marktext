@@ -126,7 +126,10 @@ describe('find interaction', () => {
         const input = document.createElement('input');
         document.body.appendChild(input);
         input.focus();
-        document.getSelection()?.collapse(blocks()[0].domNode, 0);
+        const paragraph = blocks()[0].domNode;
+        if (!paragraph)
+            throw new Error('Expected a rendered paragraph');
+        document.getSelection()?.collapse(paragraph, 0);
         expect(muya.getSelectionState()).toEqual(selected);
         muya.replace('pear', { isSingle: true, isRegexp: false, fromSelection: true });
         expect(blocks()[0].text).toBe('pear apricot apple');
