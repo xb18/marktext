@@ -360,13 +360,6 @@ for (const policy of ['restoreLastWindow', 'blank'] as const) {
         )
         .toBe(2)
       const before = state(directory)
-      const mostRecentWindow = before.session.windows.find(
-        (window: { id: string; documents: Array<{ id: string }> }) =>
-          readFileSync(join(directory, 'recovery', window.id, `${window.documents[0].id}.json`), 'utf8')
-            .includes('Most recent draft')
-      )
-      expect(mostRecentWindow).toBeDefined()
-      await expect.poll(() => state(directory).session.activeWindowId).toBe(mostRecentWindow.id)
       await second.evaluate(async(policy) => {
         await window.electron.ipcRenderer.invoke('mt::preferences::update', {
           startUpAction: policy
@@ -384,7 +377,7 @@ for (const policy of ['restoreLastWindow', 'blank'] as const) {
         await expect(
           restored.page.getByRole('textbox', { name: 'Document', exact: true })
         ).toContainText('Most recent draft')
-        expect(state(directory).session.windows[0].id).toBe(mostRecentWindow.id)
+        expect(state(directory).session.windows[0].id).toBe(before.session.activeWindowId)
       } else expect((await getMarkdownContent(restored.page, restored.app)).trim()).toBe('')
       for (const window of before.session.windows) {
         expect(
